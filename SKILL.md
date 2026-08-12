@@ -7,7 +7,7 @@ description: "当用户需要可信搜索、权威材料检索、政策法规/�
 description_zh: "深知可信搜索（法律、政策、标准）是由北京彩智科技有限公司旗下“深知可信智能”提供的可信搜索与权威材料检索 Skill，面向政策法规、政务办事依据、税务社保、公积金、企业补贴、资质证照、行业标准、公共服务、合规义务、政策调研、城市政策对比和企业投资/技改/税惠材料核验等工作场景。默认调用可信搜索接口，按需调用深度搜索接口，输出带权威来源、知识专库、可点击溯源 HTML 和干净 Markdown 的结果。"
 description_en: "dknowc trusted search is a trusted search and authoritative-source retrieval Skill provided by dknowc Trusted Intelligence under Beijing Caizhi Technology Co., Ltd. It supports policy, regulation, government-service evidence, standards, compliance, subsidy, tax-benefit and policy research tasks. It defaults to trusted search, uses deep search only on explicit user request or confirmation, and delivers a direct answer, clickable provenance HTML, and clean Markdown without citation markers."
 category: 通用办公
-version: 1.1.0
+version: 1.1.1
 author: 彩智科技
 permissions:
   network:
@@ -92,36 +92,34 @@ node scripts/register_key.mjs register --phone <手机号> --vcode <验证码> -
 2. 判断是否需要追问：如果缺少地域、主体、时间、事项类型、企业条件等关键变量且会改变结论，先问用户；否则先搜索。
 3. 可信搜索：用 `scripts/trusted_search.py` 获取权威材料。复杂任务可拆成多次搜索，每次围绕不同地域、层级、政策类型、税种、标准或证据缺口。
 4. 综合答案：基于搜索结果形成面向用户问题的最终答案，并在关键结论后标注真实可支撑的 `[数字]` 来源角标。
-5. 保存答案：把带角标的最终答案保存到 `/tmp/dknowc_search_answer.txt` 或同类临时文件。
-6. 生成交付物：调用 `scripts/render_trace_html.py`，用同一份答案生成溯源 HTML 和干净 Markdown。
-7. 回复用户：给出直接答案，并附上本地 HTML 路径、干净 Markdown 路径和知识专库链接。
+5. 保存答案：把带角标的最终答案保存到 `official-docs/search-results/dknowc_search_answer.txt` 或同目录文件。
+6. 生成交付物：调用 `scripts/render_trace_html.py`，用同一份答案生成溯源 HTML 和干净 Markdown，交付物输出到 `official-docs/output/`。
+7. 回复用户：给出直接答案，并附上 `official-docs/output/` 下的 HTML 路径、干净 Markdown 路径和知识专库链接。
 8. 深度搜索邀约：最终回复末尾询问用户是否需要进一步做深度搜索，例如：“我还可以继续为你做一次深度搜索，对结果进行多轮核验和扩展，输出一份更完整、可直接使用的深度版结果。这个过程耗时会更长，通常需要几分钟。需要我继续吗？”
 
 ## 可信搜索调用
 
 ```bash
-python3 {baseDir}/scripts/trusted_search.py "忠实于用户目标的搜索问题" --json-only > /tmp/dknowc_search.json
+python3 {baseDir}/scripts/trusted_search.py "忠实于用户目标的搜索问题" --json-only --output official-docs/search-results/dknowc_search.json
 python3 {baseDir}/scripts/render_trace_html.py \
-  /tmp/dknowc_search.json \
-  --output-dir ./outputs \
+  official-docs/search-results/dknowc_search.json \
   --title "深知可信搜索（法律、政策、标准）可信溯源" \
-  --answer-file /tmp/dknowc_search_answer.txt \
+  --answer-file official-docs/search-results/dknowc_search_answer.txt \
   --question "用户原始问题"
 ```
 
-`render_trace_html.py` 会同时生成 HTML 和同名 `.clean.md`。如需指定干净 Markdown 路径，传 `--clean-md-output ./outputs/xxx.md`。
+`render_trace_html.py` 会同时生成 HTML 和同名 `.clean.md`，输出到 `official-docs/output/`。如需指定干净 Markdown 路径，传 `--clean-md-output official-docs/output/xxx.md`。
 
 ## 深度搜索调用
 
 用户明确要求深度搜索时，先提示耗时，再直接调用：
 
 ```bash
-python3 {baseDir}/scripts/deep_query.py "忠实于用户目标的复杂问题" --area 单个地域 --json-only > /tmp/dknowc_deep.json
+python3 {baseDir}/scripts/deep_query.py "忠实于用户目标的复杂问题" --area 单个地域 --json-only --output official-docs/search-results/dknowc_deep.json
 python3 {baseDir}/scripts/render_trace_html.py \
-  /tmp/dknowc_deep.json \
-  --output-dir ./outputs \
+  official-docs/search-results/dknowc_deep.json \
   --title "深知可信搜索（法律、政策、标准）深度搜索溯源" \
-  --answer-file /tmp/dknowc_deep_answer.txt \
+  --answer-file official-docs/search-results/dknowc_deep_answer.txt \
   --question "用户原始问题"
 ```
 

@@ -12,6 +12,41 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 
+SKILL_ROOT = Path(__file__).resolve().parent.parent
+SEARCH_RESULTS_DIR = SKILL_ROOT / "official-docs" / "search-results"
+OUTPUT_DIR = SKILL_ROOT / "official-docs" / "output"
+
+
+def _is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _safe_input_path(value: str, allowed_suffixes: set) -> Path:
+    """把待读取文件定位到 skill 的 official-docs/search-results/ 内。"""
+    raw = Path(value).expanduser()
+    resolved = raw.resolve() if raw.is_absolute() else (SEARCH_RESULTS_DIR / raw.name).resolve()
+    if resolved.suffix.lower() not in allowed_suffixes:
+        raise ValueError(f"只允许读取 {', '.join(sorted(allowed_suffixes))} 文件: {value}")
+    if not _is_within(resolved, SEARCH_RESULTS_DIR.resolve()):
+        raise ValueError(f"输入文件必须位于 official-docs/search-results/ 内: {SEARCH_RESULTS_DIR}")
+    return resolved
+
+
+def _safe_output_path(value: str, allowed_suffixes: set, default_suffix: str) -> Path:
+    """把输出文件定位到 skill 的 official-docs/output/ 内。"""
+    raw = Path(value).expanduser()
+    resolved = raw.resolve() if raw.is_absolute() else (OUTPUT_DIR / raw.name).resolve()
+    if resolved.suffix.lower() not in allowed_suffixes:
+        resolved = resolved.with_suffix(default_suffix)
+    if not _is_within(resolved, OUTPUT_DIR.resolve()):
+        raise ValueError(f"输出文件必须位于 official-docs/output/ 内: {OUTPUT_DIR}")
+    return resolved
+
+
 def esc(value: Any) -> str:
     return html.escape(str(value or ""), quote=True)
 
@@ -938,32 +973,30 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
 def main() -> None:
     parser = argparse.ArgumentParser(description="生成深知可信搜索可交互可信溯源 HTML")
     parser.add_argument("input_json", help="trusted_search.py 或 deep_query.py 的 --json-only 输出 JSON")
-    parser.add_argument("--output", help="输出 HTML 路径；不传时根据问题自动生成短文件名")
-    parser.add_argument("--output-dir", default="./outputs", help="未传 --output 时的输出目录")
+    parser.add_argument("--output", help="输出 HTML 路径；不传时根据问题自动生成短文件名到 official-docs/output/")
     parser.add_argument("--title", default="深知可信搜索可信溯源", help="页面标题")
     parser.add_argument("--answer-file", help="最终回答正文文件。复杂任务综合后必须传入，确保 HTML 展示的答案与聊天答案一致。")
     parser.add_argument("--clean-md-output", help="输出干净 Markdown 路径；内容来自同一份最终答案，并移除 [1]、【1】等溯源角标。")
     parser.add_argument("--question", default="", help="用户问题，用于生成顶部对话气泡。")
     args = parser.parse_args()
 
-    payload = load_json(Path(args.input_json))
+    payload = load_json(_safe_input_path(args.input_json, {".json"}))
     answer_override = ""
     if args.answer_file:
-        answer_override = Path(args.answer_file).expanduser().read_text(encoding="utf-8")
+        answer_override = _safe_input_path(args.answer_file, {".txt", ".md"}).read_text(encoding="utf-8")
     question = args.question.strip() or extract_question(unwrap(payload))
     generated_at = datetime.now()
-    output = (
-        Path(args.output).expanduser().resolve()
-        if args.output
-        else (Path(args.output_dir).expanduser().resolve() / safe_output_filename(question, generated_at))
-    )
+    if args.output:
+        output = _safe_output_path(args.output, {".html", ".htm"}, ".html")
+    else:
+        output = _safe_output_path(safe_output_filename(question, generated_at), {".html", ".htm"}, ".html")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(render_html(payload, args.title, answer_override=answer_override, question_override=args.question, generated_at=generated_at), encoding="utf-8")
     print(f"已生成：{output}")
     if args.clean_md_output:
-        clean_output = Path(args.clean_md_output).expanduser().resolve()
+        clean_output = _safe_output_path(args.clean_md_output, {".md"}, ".md")
     else:
-        clean_output = output.with_suffix(".clean.md")
+        clean_output = _safe_output_path(output.with_suffix(".clean.md").name, {".md"}, ".md")
     clean_output.parent.mkdir(parents=True, exist_ok=True)
     clean_answer = strip_citation_markers(answer_override or extract_answer(unwrap(payload)))
     clean_output.write_text(clean_answer, encoding="utf-8")

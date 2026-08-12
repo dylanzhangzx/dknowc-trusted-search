@@ -13,6 +13,41 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 
+SKILL_ROOT = Path(__file__).resolve().parent.parent
+SEARCH_RESULTS_DIR = SKILL_ROOT / "official-docs" / "search-results"
+OUTPUT_DIR = SKILL_ROOT / "official-docs" / "output"
+
+
+def _is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _safe_input_path(value: str, allowed_suffixes: set) -> Path:
+    """把待读取数据文件定位到 skill 的 official-docs/search-results/ 内。"""
+    raw = Path(value).expanduser()
+    resolved = raw.resolve() if raw.is_absolute() else (SEARCH_RESULTS_DIR / raw.name).resolve()
+    if resolved.suffix.lower() not in allowed_suffixes:
+        raise ValueError(f"只允许读取 {', '.join(sorted(allowed_suffixes))} 文件: {value}")
+    if not _is_within(resolved, SEARCH_RESULTS_DIR.resolve()):
+        raise ValueError(f"输入文件必须位于 official-docs/search-results/ 内: {SEARCH_RESULTS_DIR}")
+    return resolved
+
+
+def _safe_output_path(value: str, allowed_suffixes: set) -> Path:
+    """把输出文件定位到 skill 的 official-docs/output/ 内。"""
+    raw = Path(value).expanduser()
+    resolved = raw.resolve() if raw.is_absolute() else (OUTPUT_DIR / raw.name).resolve()
+    if resolved.suffix.lower() not in allowed_suffixes:
+        raise ValueError(f"输出文件后缀必须是 {', '.join(sorted(allowed_suffixes))}: {value}")
+    if not _is_within(resolved, OUTPUT_DIR.resolve()):
+        raise ValueError(f"输出文件必须位于 official-docs/output/ 内: {OUTPUT_DIR}")
+    return resolved
+
+
 PALETTE = ["#2563eb", "#059669", "#f97316", "#7c3aed", "#dc2626", "#0891b2"]
 HEAT_COLORS = ["#eef2ff", "#dbeafe", "#bfdbfe", "#93c5fd", "#60a5fa", "#2563eb"]
 NAME_KEYS = ["name", "city", "region", "area", "对象", "名称", "城市", "地市", "地区", "区域"]
@@ -505,10 +540,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    input_path = Path(args.input).expanduser().resolve()
-    output_path = Path(args.output).expanduser().resolve()
-    if output_path.suffix.lower() != ".svg":
-        raise ValueError("可视化只支持输出 SVG 图片；请使用 .svg 作为输出扩展名。")
+    input_path = _safe_input_path(args.input, {".json", ".csv"})
+    output_path = _safe_output_path(args.output, {".svg"})
     metric_names = [x.strip() for x in args.metrics.split(",") if x.strip()] if args.metrics else None
     data = load_data(input_path)
     output_text = render_svg(data, args.title, input_path, metric_names)

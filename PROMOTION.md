@@ -14,7 +14,7 @@ https://github.com/dylanzhangzx/dknowc-trusted-search
 
 Title:
 
-v1.1.0 - GitHub public release
+v1.1.1 - GitHub public release
 
 Body:
 
@@ -28,6 +28,7 @@ Highlights:
 - Generates policy visualizations as SVG when requested (`scripts/render_policy_visualization.py`).
 - API Key is injected only through the environment variable `DKNOWC_API_KEY`; the Skill does not include a local `config.ini` and does not contain any real API Key.
 - No unified consulting interface: the Skill no longer calls `gov_chat.py`.
+- v1.1.1 unifies the Skill workspace: intermediate artifacts and deliverables land under `official-docs/` inside the Skill directory (no more `/tmp` or top-level `outputs/`). `trusted_search.py`/`deep_query.py` gain `--output/-o` to write result JSON natively to `official-docs/search-results/`; render scripts read from `search-results/` and write to `output/`.
 
 Users can manage MaaS usage at https://platform.dknowc.cn/.
 

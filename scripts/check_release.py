@@ -5,9 +5,19 @@ import re
 from pathlib import Path
 
 
+def _is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 SKIP_PARTS = {".git"}
 BANNED_DIRS = {"outputs"}
+WORKSPACE_DIR = SKILL_ROOT / "official-docs"
+ALLOWED_WORKSPACE_FILES = {".gitkeep"}
 SKIP_FILES = {"CHANGE_log.md"}
 BANNED_FILES = {"config.ini", "_meta.json", "config.ini.example", "register.mjs"}
 BANNED_ARTIFACT_NAMES = {".DS_Store"}
@@ -37,6 +47,9 @@ def main():
             continue
         if path.is_file() and path.name in BANNED_FILES:
             findings.append(f"{path.relative_to(SKILL_ROOT)}: 公开包不得包含真实配置文件")
+            continue
+        if path.is_file() and _is_within(path, WORKSPACE_DIR) and path.name not in ALLOWED_WORKSPACE_FILES:
+            findings.append(f"{path.relative_to(SKILL_ROOT)}: official-docs/ 工作区内只允许 .gitkeep 占位，公开包不得包含工作区产物")
             continue
         if not path.is_file() or path.name in SKIP_FILES or any(part in SKIP_PARTS for part in path.parts):
             continue

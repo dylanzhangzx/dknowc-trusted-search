@@ -13,10 +13,32 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 DEFAULT_ENDPOINT = "https://open.dknowc.cn/api/services/deep-query/v2"
+SKILL_ROOT = Path(__file__).resolve().parent.parent
+SEARCH_RESULTS_DIR = SKILL_ROOT / "official-docs" / "search-results"
+
+
+def resolve_output_json(output_path: str) -> Path:
+    """把深度搜索结果 JSON 落到 official-docs/search-results/，阻断路径遍历。"""
+    raw_path = Path(output_path).expanduser()
+    if raw_path.is_absolute():
+        resolved = raw_path.resolve()
+    elif raw_path.parent == Path("."):
+        resolved = (SEARCH_RESULTS_DIR / raw_path.name).resolve()
+    else:
+        resolved = (SKILL_ROOT / raw_path).resolve()
+
+    if resolved.suffix.lower() != ".json":
+        resolved = resolved.with_suffix(".json")
+    try:
+        resolved.relative_to(SEARCH_RESULTS_DIR.resolve())
+    except ValueError:
+        raise ValueError(f"输出文件必须位于 official-docs/search-results/ 内: {output_path}")
+    return resolved
 
 
 def _pick(*values: Optional[str]) -> str:
@@ -188,6 +210,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="只打印请求参数，不发起请求")
     parser.add_argument("--raw", action="store_true", help="打印原始事件 JSON")
     parser.add_argument("--json-only", action="store_true", help="仅输出结构化 JSON")
+    parser.add_argument("--output", "-o", help="深度搜索结果 JSON 文件名，写入 official-docs/search-results/（配合 --json-only 使用）")
     parser.add_argument("--show-materials", type=int, default=5, help="摘要中展示前 N 条材料")
     parser.add_argument("--timeout", type=int, default=180, help="请求超时秒数")
     args = parser.parse_args()
@@ -216,7 +239,14 @@ def main() -> None:
     events, timings = _post_sse(endpoint, api_key, payload, args.timeout)
 
     if args.json_only:
-        print(json.dumps({"success": True, "timings": timings, "events": events}, ensure_ascii=False, indent=2))
+        raw_json = json.dumps({"success": True, "timings": timings, "events": events}, ensure_ascii=False, indent=2)
+        if args.output:
+            output_path = resolve_output_json(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(raw_json, encoding="utf-8")
+            print(f"已保存深度搜索结果 JSON：{output_path.relative_to(SKILL_ROOT)}")
+        else:
+            print(raw_json)
         return
 
     if args.raw:

@@ -13,10 +13,32 @@ import sys
 import textwrap
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 
 DEFAULT_ENDPOINT = "https://open.dknowc.cn/dependable/search"
+SKILL_ROOT = Path(__file__).resolve().parent.parent
+SEARCH_RESULTS_DIR = SKILL_ROOT / "official-docs" / "search-results"
+
+
+def resolve_output_json(output_path: str) -> Path:
+    """把搜索结果 JSON 落到 official-docs/search-results/，阻断路径遍历。"""
+    raw_path = Path(output_path).expanduser()
+    if raw_path.is_absolute():
+        resolved = raw_path.resolve()
+    elif raw_path.parent == Path("."):
+        resolved = (SEARCH_RESULTS_DIR / raw_path.name).resolve()
+    else:
+        resolved = (SKILL_ROOT / raw_path).resolve()
+
+    if resolved.suffix.lower() != ".json":
+        resolved = resolved.with_suffix(".json")
+    try:
+        resolved.relative_to(SEARCH_RESULTS_DIR.resolve())
+    except ValueError:
+        raise ValueError(f"输出文件必须位于 official-docs/search-results/ 内: {output_path}")
+    return resolved
 
 
 def _pick(*values: Optional[str]) -> str:
@@ -255,6 +277,7 @@ def main() -> None:
     parser.add_argument("--show-payload", action="store_true", help="打印请求参数")
     parser.add_argument("--dry-run", action="store_true", help="只打印请求参数，不发起请求")
     parser.add_argument("--json-only", action="store_true", help="仅输出原始 JSON")
+    parser.add_argument("--output", "-o", help="搜索结果 JSON 文件名，写入 official-docs/search-results/（配合 --json-only 使用）")
     parser.add_argument("--timeout", type=int, default=60, help="请求超时秒数")
     args = parser.parse_args()
 
@@ -282,7 +305,14 @@ def main() -> None:
 
     body = _post(endpoint, api_key, payload, args.timeout)
     if args.json_only:
-        print(json.dumps(body, ensure_ascii=False, indent=2))
+        raw_json = json.dumps(body, ensure_ascii=False, indent=2)
+        if args.output:
+            output_path = resolve_output_json(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(raw_json, encoding="utf-8")
+            print(f"已保存搜索结果 JSON：{output_path.relative_to(SKILL_ROOT)}")
+        else:
+            print(raw_json)
         return
     _print_summary(body, args.max_articles, args.max_paragraphs, args.paragraph_chars)
 

@@ -36,6 +36,15 @@ python3 scripts/initialize.py
 - 深度搜索接口：`https://open.dknowc.cn/api/services/deep-query/v2`
 - MaaS 管理平台：`https://platform.dknowc.cn/`
 
+## 工作区与产物约定
+
+本 Skill 的所有中间产物与交付物统一落在 Skill 目录下的 `official-docs/` 工作区，不再向 `/tmp` 或顶层 `outputs/` 写文件：
+
+- `official-docs/search-results/`：查询/搜索/深度搜索结果 JSON 与答案文件。
+- `official-docs/output/`：可点击溯源 HTML、干净 Markdown、政策可视化 SVG 等最终交付物。
+
+查询脚本配合 `--json-only --output <文件名>` 原生落盘到 `search-results/`；渲染脚本自动从 `search-results/` 读取、向 `output/` 写入。
+
 ## 常用测试
 
 ```bash
@@ -51,4 +60,4 @@ python3 scripts/trusted_search.py "公积金租房提取政策原文" --show-pay
 python3 scripts/deep_query.py "重庆智能化改造补贴和税惠综合判断" --area 重庆 --show-payload --dry-run
 ```
 
-公开包不得包含 `_meta.json`、`CHANGE_log.md`、`config.ini`、`config.ini.example`、`register.mjs`、真实 API Key、本地生成的 HTML/SVG 输出或缓存文件。
+公开包不得包含 `_meta.json`、`CHANGE_log.md`、`config.ini`、`config.ini.example`、`register.mjs`、真实 API Key、本地生成的 HTML/SVG 输出或缓存文件；`official-docs/` 工作区内只允许保留 `.gitkeep` 占位。
