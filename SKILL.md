@@ -7,7 +7,7 @@ description: "当用户需要可信搜索、权威材料检索、政策法规/�
 description_zh: "深知可信搜索（法律、政策、标准）是由北京彩智科技有限公司旗下“深知可信智能”提供的可信搜索与权威材料检索 Skill，面向政策法规、政务办事依据、税务社保、公积金、企业补贴、资质证照、行业标准、公共服务、合规义务、政策调研、城市政策对比和企业投资/技改/税惠材料核验等工作场景。默认调用可信搜索接口，按需调用深度搜索接口，输出带权威来源、知识专库、可点击溯源 HTML 和干净 Markdown 的结果。"
 description_en: "dknowc trusted search is a trusted search and authoritative-source retrieval Skill provided by dknowc Trusted Intelligence under Beijing Caizhi Technology Co., Ltd. It supports policy, regulation, government-service evidence, standards, compliance, subsidy, tax-benefit and policy research tasks. It defaults to trusted search, uses deep search only on explicit user request or confirmation, and delivers a direct answer, clickable provenance HTML, and clean Markdown without citation markers."
 category: 通用办公
-version: 1.1.1
+version: 1.1.2
 author: 彩智科技
 permissions:
   network:
@@ -16,7 +16,7 @@ permissions:
   local_read:
     - "本 Skill 的说明和脚本文件"
   local_write:
-    - "本轮可信溯源 HTML、干净 Markdown、政策可视化 SVG 和接口结果中间文件"
+    - "本轮可信溯源 HTML、干净 Markdown、可交互政策可视化 HTML 报告（含可选 SVG 快照）和接口结果中间文件"
 secrets:
   - "DKNOWC_API_KEY"
 ---
@@ -94,8 +94,9 @@ node scripts/register_key.mjs register --phone <手机号> --vcode <验证码> -
 4. 综合答案：基于搜索结果形成面向用户问题的最终答案，并在关键结论后标注真实可支撑的 `[数字]` 来源角标。
 5. 保存答案：把带角标的最终答案保存到 `official-docs/search-results/dknowc_search_answer.txt` 或同目录文件。
 6. 生成交付物：调用 `scripts/render_trace_html.py`，用同一份答案生成溯源 HTML 和干净 Markdown，交付物输出到 `official-docs/output/`。
-7. 回复用户：给出直接答案，并附上 `official-docs/output/` 下的 HTML 路径、干净 Markdown 路径和知识专库链接。
-8. 深度搜索邀约：最终回复末尾询问用户是否需要进一步做深度搜索，例如：“我还可以继续为你做一次深度搜索，对结果进行多轮核验和扩展，输出一份更完整、可直接使用的深度版结果。这个过程耗时会更长，通常需要几分钟。需要我继续吗？”
+7. （可选，仅用户明确要求图表时）把核验后的数据整理成统一结构化 JSON 写入 `official-docs/search-results/`，调用 `scripts/render_policy_visualization.py` 生成可交互可视化 HTML 报告（`--svg` 附快照），输出到 `official-docs/output/`。
+8. 回复用户：给出直接答案，并附上 `official-docs/output/` 下的 HTML 路径、干净 Markdown 路径和知识专库链接。
+9. 深度搜索邀约：最终回复末尾询问用户是否需要进一步做深度搜索，例如：“我还可以继续为你做一次深度搜索，对结果进行多轮核验和扩展，输出一份更完整、可直接使用的深度版结果。这个过程耗时会更长，通常需要几分钟。需要我继续吗？”
 
 ## 可信搜索调用
 
@@ -175,4 +176,33 @@ skills.sh Public 版 API Key 统一且只通过环境变量 `DKNOWC_API_KEY` 注
 
 ## 可视化
 
-用户明确要求生成图表、热力图、柱状图、雷达图或区域对比图时，可基于已经核验的政策数据调用 `scripts/render_policy_visualization.py` 生成 SVG 图片并直接展示。可视化不是 HTML 报告能力，不生成可视化 HTML 页面。
+用户明确要求“图表、对比图、热力图、柱状图、雷达图、时间线、流程图、材料清单表格、政策对比、补贴金额对比、政策时间分布”等表达时才生成，是显式触发能力，不属于默认三件套。默认三件套交付完成后，如用户再要求图表，按本流程补生成。
+
+生成前，Agent 基于已核验的可信搜索结果，把数据整理为统一结构化 JSON（每个数据点必须带 `sources` 来源绑定）写入 `official-docs/search-results/`，再调用脚本。脚本离线运行、零网络依赖、不引用外部 CDN/字体，输出自包含可交互 HTML 报告（主交付）到 `official-docs/output/`，可选 `--svg` 追加一张静态 SVG 快照用于聊天内直接展示。
+
+支持的场景（`metadata.scenario`，缺省自动识别，`--scenario` 可覆盖）：
+- `city_compare` 地域/城市政策对比：对象×指标数据表（主视图）+ 每指标简单柱状对比
+- `amount_compare` 补贴金额/税惠数值对比：对象×指标数据表 + 每指标简单柱状对比
+- `process_steps` 办理流程/材料清单：流程步骤时间线、材料清单表格（必需/可选徽标）
+- `timeline` 政策时间线/分布：横向时间轴（按地域或类型分轨）、按年/月分布直方图
+
+**呈现原则：以"清楚展示搜索数据"为第一优先，不追求花哨。** 默认单页顺序排列，首屏即对象×指标数据表（原始值+单位），随后是每指标一张简单柱状图；不生成雷达图、排名列表、KPI 卡等主观评价模块。来源统一收敛：每行一个"来源"入口（点击展开该对象全部来源），全量来源清单集中到页脚。
+
+统一 JSON schema 约定：
+- `metadata`：`title/region/topic/scenario/source_note/question/consult_date/eff_time/knowledge_base_url`
+- `metrics`（推荐显式声明）：`code/label/unit/scale/kind/direction`；不声明时自动识别数值列，并在报告中标注"自动口径，未做跨口径校准"。**指标要少而精**：只保留口径统一、能说明问题的关键指标（如最高补贴比例、封顶金额），不要把口径复杂/易误导的字段塞进图
+- `items`：`name/positioning/keywords/metrics/note/sources`（兼容旧对比数据）
+- `time`：`date/label/title/url/area/kind/detail/sources`
+- `steps`：`step/title/detail/duration/owner/url/sources`
+- `materials`：`name/required/note/sources`
+- `sources`：URL 字符串或 `{url,title}` 对象组成的数组；每个数据点必须携带，用于行级溯源与页脚清单
+
+调用示例：
+
+```bash
+python3 {baseDir}/scripts/render_policy_visualization.py \
+  --input official-docs/search-results/viz_city_compare.json \
+  --title "长三角城市智能制造补贴政策对比" --svg
+```
+
+默认输出 `<标题或scenario>_<时间戳>.html`；`--output` 指定文件名；`--scenario` 覆盖自动识别；`--svg` 同时输出同名 `.svg` 快照（仅含数据表对应的简单柱状对比）。输出只写 `official-docs/output/`。HTML 为 AI 综合解读，金额等关键数值须能在对应来源原文找到依据，与三件套同一套核验口径。

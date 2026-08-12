@@ -8,7 +8,7 @@
 - 深度搜索：仅在用户明确要求或确认升级后，调用 `scripts/deep_query.py` 做多轮检索和分析。
 - 最终交付：直接回复答案、可点击溯源 HTML、无来源角标的干净 Markdown。
 - 默认溯源 HTML：最终解决问题时，用 `scripts/render_trace_html.py` 生成可点击溯源 HTML，并同步生成同名 `.clean.md`。
-- 政策可视化：用户明确要求图表、热力图、雷达图或区域对比图时，用 `scripts/render_policy_visualization.py` 生成一张可直接展示的 SVG 图片，不生成可视化 HTML。
+- 政策可视化：用户明确要求图表时，用 `scripts/render_policy_visualization.py` 基于结构化 JSON 生成自包含 HTML 报告（可选 `--svg` 静态快照），以"清楚展示搜索数据"为原则——首屏数据表 + 每指标简单柱状图，覆盖城市对比/补贴金额/办理流程/时间线四类场景，来源收敛到行级与页脚。
 
 ## 首次启动初始化
 
@@ -41,7 +41,7 @@ python3 scripts/initialize.py
 本 Skill 的所有中间产物与交付物统一落在 Skill 目录下的 `official-docs/` 工作区，不再向 `/tmp` 或顶层 `outputs/` 写文件：
 
 - `official-docs/search-results/`：查询/搜索/深度搜索结果 JSON 与答案文件。
-- `official-docs/output/`：可点击溯源 HTML、干净 Markdown、政策可视化 SVG 等最终交付物。
+- `official-docs/output/`：可点击溯源 HTML、干净 Markdown、可交互政策可视化 HTML 报告（及可选 SVG 快照）等最终交付物。
 
 查询脚本配合 `--json-only --output <文件名>` 原生落盘到 `search-results/`；渲染脚本自动从 `search-results/` 读取、向 `output/` 写入。
 

@@ -14,7 +14,7 @@ https://github.com/dylanzhangzx/dknowc-trusted-search
 
 Title:
 
-v1.1.1 - GitHub public release
+v1.1.2 - GitHub public release
 
 Body:
 
@@ -25,10 +25,11 @@ Highlights:
 - Uses the skills.sh channel configuration.
 - Defaults to trusted search (`scripts/trusted_search.py`); deep search (`scripts/deep_query.py`) is only used on explicit user request or confirmation.
 - Delivers a three-piece output: a direct answer, clickable provenance HTML, and clean Markdown with source markers removed (`scripts/render_trace_html.py`).
-- Generates policy visualizations as SVG when requested (`scripts/render_policy_visualization.py`).
+- Generates interactive policy-visualization HTML reports on request, with optional `--svg` static snapshots (`scripts/render_policy_visualization.py`).
 - API Key is injected only through the environment variable `DKNOWC_API_KEY`; the Skill does not include a local `config.ini` and does not contain any real API Key.
 - No unified consulting interface: the Skill no longer calls `gov_chat.py`.
-- v1.1.1 unifies the Skill workspace: intermediate artifacts and deliverables land under `official-docs/` inside the Skill directory (no more `/tmp` or top-level `outputs/`). `trusted_search.py`/`deep_query.py` gain `--output/-o` to write result JSON natively to `official-docs/search-results/`; render scripts read from `search-results/` and write to `output/`.
+- v1.1.1 unified the Skill workspace: intermediate artifacts and deliverables land under `official-docs/` inside the Skill directory (no more `/tmp` or top-level `outputs/`); `trusted_search.py`/`deep_query.py` gained `--output/-o` to write result JSON natively to `official-docs/search-results/`.
+- v1.1.2 upgrades visualization to interactive self-contained HTML reports (primary deliverable) with per-data-point `sources` provenance binding and hover/click source popups, keeping `--svg` static snapshots for in-chat display. Unifies the visualization JSON schema (`metadata` + explicit `metrics` + `items`, backward compatible) with four scenarios (`city_compare`, `amount_compare`, `process_steps`, `timeline`); metrics engine prefers an explicit schema and falls back to auto-detection with an "auto-口径" note. HTML reports embed CSS/JS locally (no CDN, no external fonts), fully offline-capable.
 
 Users can manage MaaS usage at https://platform.dknowc.cn/.
 
