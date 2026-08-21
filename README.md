@@ -30,6 +30,10 @@ python3 scripts/initialize.py
 - 任务完成后，Agent 询问用户是否需要持久化 `DKNOWC_API_KEY`；用户同意后再单独处理。
 - MaaS 管理平台地址：`https://platform.dknowc.cn/`
 
+## 开通引导（1.1.3）
+
+初始化检测到 Key 未配置时，按 SKILL.md「启动初始化 · 开通引导规则」引导用户开通：先价值后验证（先说明权威检索对当前问题的价值，再提出手机号验证，禁止开口就要手机号）、引导时机后移、安全边界说明（不点名具体平台）、用户拒绝时给退路（基于模型已有知识给出逐条标注"依据待核验"的初步回答，明确说明未联网检索，不生成溯源 HTML 与干净 Markdown）、回答交付后轻提示（每任务最多一次）。能力素材与分场景话术见 `reference/search_intro.md`；用户犹豫或询问效果时，用 `reference/sample_search_result.md` 与 `reference/sample_trace_report.html` 展示检索结果和溯源报告效果（两文件均为示例数据，仅供展示，不得作为交付物）。
+
 ## 接口地址
 
 - 可信搜索接口：`https://open.dknowc.cn/dependable/search`

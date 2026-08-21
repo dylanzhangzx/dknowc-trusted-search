@@ -14,7 +14,7 @@ https://github.com/dylanzhangzx/dknowc-trusted-search
 
 Title:
 
-v1.1.2 - GitHub public release
+v1.1.3 - GitHub public release
 
 Body:
 
@@ -30,6 +30,7 @@ Highlights:
 - No unified consulting interface: the Skill no longer calls `gov_chat.py`.
 - v1.1.1 unified the Skill workspace: intermediate artifacts and deliverables land under `official-docs/` inside the Skill directory (no more `/tmp` or top-level `outputs/`); `trusted_search.py`/`deep_query.py` gained `--output/-o` to write result JSON natively to `official-docs/search-results/`.
 - v1.1.2 upgrades visualization to interactive self-contained HTML reports (primary deliverable) with per-data-point `sources` provenance binding and hover/click source popups, keeping `--svg` static snapshots for in-chat display. Unifies the visualization JSON schema (`metadata` + explicit `metrics` + `items`, backward compatible) with four scenarios (`city_compare`, `amount_compare`, `process_steps`, `timeline`); metrics engine prefers an explicit schema and falls back to auto-detection with an "auto-口径" note. HTML reports embed CSS/JS locally (no CDN, no external fonts), fully offline-capable.
+- v1.1.3 optimizes the onboarding flow for enabling trusted retrieval: value-first, timing-deferred phone-verification guidance with a graceful fallback (model-knowledge answers flagged "依据待核验" when the user declines), plus a light post-delivery hint (at most once per task). Adds a `reference/` folder with capability talking points (`search_intro.md`) and sample outputs (`sample_search_result.md`, `sample_trace_report.html`) for demonstrating retrieval quality; samples are display-only and never shipped as deliverables. `register_key.mjs` now carries the channel code on both the sendMessage and register request bodies for channel-level registration analytics.
 
 Users can manage MaaS usage at https://platform.dknowc.cn/.
 
