@@ -206,25 +206,33 @@ def extract_articles_from_search(payload: Dict[str, Any]) -> List[Dict[str, Any]
 
 
 def extract_articles_from_deep(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-    events = payload.get("events")
-    if isinstance(events, list):
-        for event in events:
-            if isinstance(event, list) and len(event) == 2:
-                name, obj = event
-            elif isinstance(event, dict):
-                name, obj = event.get("event"), event
-            else:
-                continue
-            if name == "result" and isinstance(obj, dict):
-                data = obj.get("data")
-                result_list = data.get("list") if isinstance(data, dict) else None
-                if isinstance(result_list, list):
-                    return [x for x in result_list if isinstance(x, dict)]
+    """深度搜索 deep-query/v3 非流式格式：{"data": {"searches": [{"result": [...]}], "common_articles": [...]}}。"""
     data = payload.get("data")
-    result_list = data.get("list") if isinstance(data, dict) else None
-    if isinstance(result_list, list):
-        return [x for x in result_list if isinstance(x, dict)]
-    return []
+    if not isinstance(data, dict):
+        return []
+    searches = data.get("searches")
+    if not isinstance(searches, list):
+        return []
+    seen: set = set()
+    out: List[Dict[str, Any]] = []
+
+    def _add(article: Any) -> None:
+        if not isinstance(article, dict):
+            return
+        key = str(article.get("源网址") or article.get("文章标题") or "")
+        if key and key in seen:
+            return
+        if key:
+            seen.add(key)
+        out.append(article)
+
+    for search in searches:
+        if isinstance(search, dict):
+            for article in search.get("result") or []:
+                _add(article)
+    for article in data.get("common_articles") or []:
+        _add(article)
+    return out
 
 
 def extract_reference_materials(payload: Dict[str, Any]) -> List[Dict[str, Any]]:

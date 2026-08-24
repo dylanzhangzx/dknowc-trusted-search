@@ -7,7 +7,7 @@ description: "当用户需要可信搜索、权威材料检索、政策法规/�
 description_zh: "深知可信搜索（法律、政策、标准）是由北京彩智科技有限公司旗下“深知可信智能”提供的可信搜索与权威材料检索 Skill，面向政策法规、政务办事依据、税务社保、公积金、企业补贴、资质证照、行业标准、公共服务、合规义务、政策调研、城市政策对比和企业投资/技改/税惠材料核验等工作场景。默认调用可信搜索接口，按需调用深度搜索接口，输出带权威来源、知识专库、可点击溯源 HTML 和干净 Markdown 的结果。"
 description_en: "dknowc trusted search is a trusted search and authoritative-source retrieval Skill provided by dknowc Trusted Intelligence under Beijing Caizhi Technology Co., Ltd. It supports policy, regulation, government-service evidence, standards, compliance, subsidy, tax-benefit and policy research tasks. It defaults to trusted search, uses deep search only on explicit user request or confirmation, and delivers a direct answer, clickable provenance HTML, and clean Markdown without citation markers."
 category: 通用办公
-version: 1.1.3
+version: 1.1.4
 author: 彩智科技
 permissions:
   network:
@@ -142,7 +142,7 @@ python3 {baseDir}/scripts/render_trace_html.py \
   --question "用户原始问题"
 ```
 
-默认不传 `queryId`，由接口自动生成。`--area` 每次只传一个地域；多地域、多层级任务应拆成多次调用，例如中国、重庆市、重庆两江新区分别搜索。
+默认不传 `queryId`；深度搜索接口（deep-query/v3）为非流式一次性返回，返回体含 `traceId` 用于链路追踪。`--area` 默认传单个地域保持聚焦；确需多地域对比时可逗号分隔一次传入（如 `--area "重庆,上海"`），服务端会按地域自动拆分子查询分组返回。
 
 如果用户没有明确要求深度搜索，不要主动调用。先完成可信搜索版答案和三件套交付，再询问用户是否升级深度搜索。
 
@@ -187,10 +187,11 @@ skills.sh Public 版 API Key 统一且只通过环境变量 `DKNOWC_API_KEY` 注
 
 深度搜索配置：
 
-- 接口地址：默认 `https://open.dknowc.cn/api/services/deep-query/v2`；可通过 `--endpoint`、`DKNOWC_KNOW_DEEP_QUERY_ENDPOINT` 或 `DKNOWC_DEEP_QUERY_ENDPOINT` 覆盖。
+- 接口地址：默认 `https://open.dknowc.cn/api/services/deep-query/v3`（非流式，一次 POST 返回完整 JSON）；可通过 `--endpoint`、`DKNOWC_KNOW_DEEP_QUERY_ENDPOINT` 或 `DKNOWC_DEEP_QUERY_ENDPOINT` 覆盖。
+- 请求体字段为 `query`（v3 起，不再使用 v2 的 `question`）；`areas` 支持一次传多个地域，服务端按地域拆分子查询；返回 `data.searches`（子查询分组材料）、`data.common_articles`（公共文章）与 `traceId`。
 - API Key：只能通过环境变量 `DKNOWC_API_KEY` 提供。
-- `area`：默认留空，仅在用户明确给出单个地域或调试时通过 `--area` 传入。
-- `query_id`：默认留空；不传时由接口自动生成。
+- `area`：默认留空；单地域聚焦优先，明确多地域对比时可用逗号分隔一次传入。
+- `query_id`：默认不传；返回侧以 `traceId` 做链路追踪。接口偶发 `code=500 转发失败`（服务端问题），提示用户稍后重试或调整问题表述。
 
 ## 可视化
 
