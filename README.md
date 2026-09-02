@@ -5,9 +5,10 @@
 ## 能力范围
 
 - 可信搜索：查找原文、依据、权威材料或来源时，调用 `scripts/trusted_search.py` 返回重点材料和知识专库链接。
-- 深度搜索：仅在用户明确要求或确认升级后，调用 `scripts/deep_query.py` 做多轮检索和分析。
-- 最终交付：直接回复答案、可点击溯源 HTML、无来源角标的干净 Markdown。
-- 默认溯源 HTML：最终解决问题时，用 `scripts/render_trace_html.py` 生成可点击溯源 HTML，并同步生成同名 `.clean.md`。
+- 深度搜索：仅在用户明确要求或确认升级后，调用 `scripts/deep_query.py`（deep-query/v3，非流式）做多轮检索和分析。
+- 最终交付：直接回复答案、可信溯源核验报告 HTML、无来源角标的干净 Markdown。
+- 默认核验报告：最终解决问题时，用 `scripts/render_trace_html.py` 生成《标题_可信核验报告_时间戳.html》（首屏核验报告单五项指标：依据溯源/引用绑定/时效检查/类型覆盖/答案自检，全部真实计算；生成前硬校验答案必须有 [n] 角标），并同步生成同名 `.clean.md`；`--self-check-file` 传入答案自检结果。
+- 宿主环境交付：交付前运行 `scripts/deliver_outputs.py`，自动探测宿主工作区（WorkBuddy 等）复制产出物并返回用户可见路径。
 - 政策可视化：用户明确要求图表时，用 `scripts/render_policy_visualization.py` 基于结构化 JSON 生成自包含 HTML 报告（可选 `--svg` 静态快照），以"清楚展示搜索数据"为原则——首屏数据表 + 每指标简单柱状图，覆盖城市对比/补贴金额/办理流程/时间线四类场景，来源收敛到行级与页脚。
 
 ## 首次启动初始化
@@ -52,7 +53,7 @@ python3 scripts/initialize.py
 ## 常用测试
 
 ```bash
-python3 -m py_compile scripts/initialize.py scripts/trusted_search.py scripts/deep_query.py scripts/render_trace_html.py scripts/render_policy_visualization.py scripts/check_release.py
+python3 -m py_compile scripts/initialize.py scripts/trusted_search.py scripts/deep_query.py scripts/render_trace_html.py scripts/render_policy_visualization.py scripts/deliver_outputs.py scripts/check_release.py
 node --check scripts/register_key.mjs
 python3 scripts/check_release.py
 ```
