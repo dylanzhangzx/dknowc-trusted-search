@@ -7,7 +7,7 @@ description: "当用户需要可信搜索、权威材料检索、政策法规/�
 description_zh: "深知可信搜索（法律、政策、标准）是由北京彩智科技有限公司旗下“深知可信智能”提供的可信搜索与权威材料检索 Skill，面向政策法规、政务办事依据、税务社保、公积金、企业补贴、资质证照、行业标准、公共服务、合规义务、政策调研、城市政策对比和企业投资/技改/税惠材料核验等工作场景。默认调用可信搜索接口，按需调用深度搜索接口，输出带权威来源、知识专库、可点击溯源 HTML 和干净 Markdown 的结果。"
 description_en: "dknowc trusted search is a trusted search and authoritative-source retrieval Skill provided by dknowc Trusted Intelligence under Beijing Caizhi Technology Co., Ltd. It supports policy, regulation, government-service evidence, standards, compliance, subsidy, tax-benefit and policy research tasks. It defaults to trusted search, uses deep search only on explicit user request or confirmation, and delivers a direct answer, clickable provenance HTML, and clean Markdown without citation markers."
 category: 通用办公
-version: 1.1.5
+version: 1.1.6
 author: 彩智科技
 permissions:
   network:
@@ -34,6 +34,8 @@ secrets:
 - 最终解决问题时必须同时交付三项：直接回复答案、可信溯源核验报告 HTML、干净 Markdown。中间追问和阶段性 ReAct 过程不要求交付三件套。
 - 最终答案必须先由 Agent 基于搜索材料综合形成，再保存为文本，通过 `render_trace_html.py --answer-file` 传入。HTML 和干净 Markdown 必须来自同一份最终答案。
 - 最终答案中的关键事实、金额、比例、适用条件、办理路径、政策名称、标准条款等必须标来源角标，例如 `[1]`、`[2]`。角标必须能被接口返回的材料标题、摘要、段落摘录或原文支撑。
+- **角标挂载纪律（防"形式绑定"）**：角标必须挂在**直接载有该条款原文**的材料上——以"点击这个角标后用户看到的摘录能否印证这句话"为判断标准。由多份材料综合得出的结论，逐条拆开、分别挂到直接载有该条款的材料；**禁止把具体条件、数字、程序类结论挂到仅主题相关但不载有该条款的材料上**（如把办理条件挂在一份"认可目录"通知上）。找不到直接载有该条款的材料时：换绑正确材料、继续搜索补证，或把该条降级标注"待核验"，三选一，不得将就挂载。
+- **关键数字不得用"以官方为准"搪塞**：用户问题的核心就是具体数字（金额、比例、期限、倍数、标准）而首轮检索只返回框架性内容时，必须再做定向补充检索（在 query 中加入"管理办法""实施细则""办理指南""申报通知"或具体区县名等）后回答；仍查不到具体数字才可写"以各区最新细则为准"，并同时给出已查到的最接近口径与其出处。
 - 不得伪造、误配或泛配角标。找不到直接依据时，应删除该结论、标为“待核验/需以主管部门口径为准”，或继续搜索补证。
 - 聊天回复默认不堆大量材料裸链接；保留核心结论、必要来源摘要、知识专库链接、核验报告路径和干净 Markdown 路径。
 - 交付状态纪律：核验报告必须以"已核验"状态交付。答案角标编号无需人工控制（渲染器自动按首次出现顺序重排为 [1][2][3]…）；被引用材料必须可回看（有原文链接，或经知识专库回看），缺少原文链接时优先换绑有链接的同类材料再生成。渲染脚本报错（答案无角标 / 角标未绑定材料）属于必须修正的错误：修答案、重跑、再交付。除用户明确知情接受外，禁止把"核验未通过"或带红色警示的报告交付给用户；确属不可抗力（如权威材料无原文链接但知识专库可回看）交付时在回复中口头说明即可，报告内以温和提示呈现。
@@ -111,7 +113,7 @@ node scripts/register_key.mjs register --phone <手机号> --vcode <验证码> -
 2. 判断是否需要追问：如果缺少地域、主体、时间、事项类型、企业条件等关键变量且会改变结论，先问用户；否则先搜索。
 3. 可信搜索：用 `scripts/trusted_search.py` 获取权威材料。复杂任务可拆成多次搜索，每次围绕不同地域、层级、政策类型、税种、标准或证据缺口。
 4. 综合答案：基于搜索结果形成面向用户问题的最终答案，并在关键结论后标注真实可支撑的 `[数字]` 来源角标。
-5. 答案自检并保存：按五项如实自检——①事实有据（关键结论有材料支撑）②角标绑定（每个角标都能对应到召回材料）③答案一致（报告答案与回复答案一致）④时效确认（材料日期已核对）⑤无未核验断言（不确定处已标"待核验"）。把带角标的最终答案保存到 `official-docs/search-results/dknowc_search_answer.txt`，自检结果写入 `official-docs/search-results/dknowc_search_selfcheck.json`（键 `fact_basis/binding/consistency/freshness/no_gap`，值写 `通过` 或 `未通过：原因`，键支持中英文）。
+5. 答案自检并保存：按五项如实自检——①事实有据（关键结论有材料支撑，且**逐条核对角标摘录支撑**：点击每个角标看到的摘录要能印证对应结论，具体条件/数字/程序不得挂在仅主题相关的材料上）②角标绑定（每个角标都能对应到召回材料）③答案一致（报告答案与回复答案一致）④时效确认（材料日期已核对）⑤无未核验断言（不确定处已标"待核验"；用户核心诉求是具体数字而未查到时，已做过定向补搜并在答案中说明）。把带角标的最终答案保存到 `official-docs/search-results/dknowc_search_answer.txt`，自检结果写入 `official-docs/search-results/dknowc_search_selfcheck.json`（键 `fact_basis/binding/consistency/freshness/no_gap`，值写 `通过` 或 `未通过：原因`，键支持中英文）。
 6. 生成核验报告：调用 `scripts/render_trace_html.py --answer-file --self-check-file`，生成《标题_可信核验报告_时间戳.html》与同名 `.clean.md` 到 `official-docs/output/`。生成前硬校验：召回材料非空而答案无 `[n]` 角标时拒绝生成并报错，须修正答案后重跑。
 7. （可选，仅用户明确要求图表时）把核验后的数据整理成统一结构化 JSON 写入 `official-docs/search-results/`，调用 `scripts/render_policy_visualization.py` 生成可交互可视化 HTML 报告（`--svg` 附快照），输出到 `official-docs/output/`。
 8. 宿主环境交付与回复：先运行 `python3 {baseDir}/scripts/deliver_outputs.py`（自动探测宿主工作区并复制最近 10 分钟产出物；返回 `need_dest=true` 时用 `--dest <工作区目录>` 重跑；正常时向用户展示返回 JSON 中的 `delivered` 路径）。然后给出直接答案，附上交付路径与知识专库链接。
