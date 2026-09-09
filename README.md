@@ -1,13 +1,13 @@
 # 深知可信搜索（法律、政策、标准）（skills.sh Public 版）
 
-这是深知可信搜索（法律、政策、标准）的 skills.sh Public 分发版本。功能逻辑与 full 版 1.1.0 对齐，不再调用统一咨询接口，默认只调用可信搜索接口；深度搜索仅在用户明确要求或确认升级后调用。本版本不内置 API Key；首次调用时必须先确认环境变量 `DKNOWC_API_KEY` 已配置。未配置时，Agent 可先通过 MaaS 手机号验证码流程获取 Key，让当前任务临时继续执行；持久化环境变量是独立步骤，必须在用户明确同意后再处理。
+这是深知可信搜索（法律、政策、标准）的 skills.sh Public 分发版本。功能逻辑与 full 版 1.1.0 对齐，不再调用统一咨询接口，默认只调用可信搜索接口；深度搜索仅在用户明确要求或确认升级后调用。本版本不内置 API Key；优先从环境变量 `DKNOWC_API_KEY` 读取，宿主进程读不到 shell 环境变量时自动从 `~/.zshrc` 兜底解析（避免 WorkBuddy 等宿主误报缺 Key）。未配置时，Agent 可先通过 MaaS 手机号验证码流程获取 Key，让当前任务临时继续执行；持久化环境变量是独立步骤，必须在用户明确同意后再处理。
 
 ## 能力范围
 
 - 可信搜索：查找原文、依据、权威材料或来源时，调用 `scripts/trusted_search.py` 返回重点材料和知识专库链接。
 - 深度搜索：仅在用户明确要求或确认升级后，调用 `scripts/deep_query.py`（deep-query/v3，非流式）做多轮检索和分析。
-- 最终交付：直接回复答案、可信溯源核验报告 HTML、无来源角标的干净 Markdown。
-- 默认核验报告：最终解决问题时，用 `scripts/render_trace_html.py` 生成《标题_可信核验报告_时间戳.html》（首屏核验报告单五项指标：依据溯源/引用绑定/时效检查/类型覆盖/答案自检，全部真实计算；生成前硬校验答案必须有 [n] 角标），并同步生成同名 `.clean.md`；`--self-check-file` 传入答案自检结果。
+- 最终交付：直接回复答案、溯源核验报告 HTML、无来源角标的干净 Markdown。
+- 默认核验报告：最终解决问题时，用 `scripts/render_trace_html.py` 生成《标题_溯源核验报告_时间戳.html》（首屏核验报告单五项指标：依据溯源/引用对应/材料新旧/材料构成/交付前检查，全部真实计算；生成前硬校验答案必须有 [n] 角标），并同步生成同名 `.clean.md`；`--self-check-file` 传入答案自检结果。
 - 宿主环境交付：交付前运行 `scripts/deliver_outputs.py`，自动探测宿主工作区（WorkBuddy 等）复制产出物并返回用户可见路径。
 - 政策可视化：用户明确要求图表时，用 `scripts/render_policy_visualization.py` 基于结构化 JSON 生成自包含 HTML 报告（可选 `--svg` 静态快照），以"清楚展示搜索数据"为原则——首屏数据表 + 每指标简单柱状图，覆盖城市对比/补贴金额/办理流程/时间线四类场景，来源收敛到行级与页脚。
 
@@ -19,7 +19,7 @@
 python3 scripts/initialize.py
 ```
 
-只有返回 `ready=true`、`api_key_configured=true`、`api_key_source=environment`，且未返回 `search_ready=false` 后，才继续处理原任务。初始化未通过时，只允许引导用户完成 MaaS Key 获取或环境变量配置，不得先输出答案、草稿、大纲、材料清单或分析结论。
+只有返回 `ready=true`、`api_key_configured=true`、`api_key_source` 为 `environment` 或 `zshrc`，且未返回 `search_ready=false` 后，才继续处理原任务。初始化未通过时，只允许引导用户完成 MaaS Key 获取或环境变量配置，不得先输出答案、草稿、大纲、材料清单或分析结论。
 
 ## MaaS 注册与环境变量配置
 
@@ -53,7 +53,7 @@ python3 scripts/initialize.py
 ## 常用测试
 
 ```bash
-python3 -m py_compile scripts/initialize.py scripts/trusted_search.py scripts/deep_query.py scripts/render_trace_html.py scripts/render_policy_visualization.py scripts/deliver_outputs.py scripts/check_release.py
+python3 -m py_compile scripts/api_key.py scripts/initialize.py scripts/trusted_search.py scripts/deep_query.py scripts/render_trace_html.py scripts/render_policy_visualization.py scripts/deliver_outputs.py scripts/check_release.py
 node --check scripts/register_key.mjs
 python3 scripts/check_release.py
 ```

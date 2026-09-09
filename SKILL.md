@@ -6,8 +6,8 @@ display_name_en: dknowc trusted search
 description: "当用户需要可信搜索、权威材料检索、政策法规/标准依据查找、可点击溯源、知识专库、政策调研、城市政策对比、企业补贴与税惠材料核验、合规依据核验，或明确要求深度搜索、深度分析、全面查找、多轮核验、完整方案时，使用深知可信搜索（法律、政策、标准）。本 Skill 默认只调用深知可信搜索接口，不使用统一咨询接口；只有用户明确要求深度搜索或在可信搜索完成后确认升级深度核验时，才调用深度搜索接口。最终交付必须包含直接回复答案、与答案一致的可点击溯源 HTML、以及移除来源角标的干净 Markdown。API Key 统一通过环境变量 DKNOWC_API_KEY 注入。"
 description_zh: "深知可信搜索（法律、政策、标准）是由北京彩智科技有限公司旗下“深知可信智能”提供的可信搜索与权威材料检索 Skill，面向政策法规、政务办事依据、税务社保、公积金、企业补贴、资质证照、行业标准、公共服务、合规义务、政策调研、城市政策对比和企业投资/技改/税惠材料核验等工作场景。默认调用可信搜索接口，按需调用深度搜索接口，输出带权威来源、知识专库、可点击溯源 HTML 和干净 Markdown 的结果。"
 description_en: "dknowc trusted search is a trusted search and authoritative-source retrieval Skill provided by dknowc Trusted Intelligence under Beijing Caizhi Technology Co., Ltd. It supports policy, regulation, government-service evidence, standards, compliance, subsidy, tax-benefit and policy research tasks. It defaults to trusted search, uses deep search only on explicit user request or confirmation, and delivers a direct answer, clickable provenance HTML, and clean Markdown without citation markers."
-category: 通用办公
-version: 1.1.6
+category: "office-efficiency"
+version: 1.2.0
 author: 彩智科技
 permissions:
   network:
@@ -31,7 +31,7 @@ secrets:
 - 默认调用 `scripts/trusted_search.py --json-only`。即使问题比较复杂，也先通过可信搜索建立证据池，再判断是否需要向用户追问或建议深度搜索。
 - 只有用户明确说“深度搜索、深度分析、全面查找、多轮核验、完整方案、深度核验”等意图，或在最终回复后确认升级，才调用 `scripts/deep_query.py`。
 - ReAct 逻辑保留：如果问题缺少会影响结论的关键信息，先追问；如果先搜索后发现证据不足或条件依赖明显，再向用户补问关键条件。
-- 最终解决问题时必须同时交付三项：直接回复答案、可信溯源核验报告 HTML、干净 Markdown。中间追问和阶段性 ReAct 过程不要求交付三件套。
+- 最终解决问题时必须同时交付三项：直接回复答案、溯源核验报告 HTML、干净 Markdown。中间追问和阶段性 ReAct 过程不要求交付三件套。
 - 最终答案必须先由 Agent 基于搜索材料综合形成，再保存为文本，通过 `render_trace_html.py --answer-file` 传入。HTML 和干净 Markdown 必须来自同一份最终答案。
 - 最终答案中的关键事实、金额、比例、适用条件、办理路径、政策名称、标准条款等必须标来源角标，例如 `[1]`、`[2]`。角标必须能被接口返回的材料标题、摘要、段落摘录或原文支撑。
 - **角标挂载纪律（防"形式绑定"）**：角标必须挂在**直接载有该条款原文**的材料上——以"点击这个角标后用户看到的摘录能否印证这句话"为判断标准。由多份材料综合得出的结论，逐条拆开、分别挂到直接载有该条款的材料；**禁止把具体条件、数字、程序类结论挂到仅主题相关但不载有该条款的材料上**（如把办理条件挂在一份"认可目录"通知上）。找不到直接载有该条款的材料时：换绑正确材料、继续搜索补证，或把该条降级标注"待核验"，三选一，不得将就挂载。
@@ -43,13 +43,13 @@ secrets:
 
 ## 启动初始化
 
-skills.sh Public 版不内置深知可信搜索 API Key。API Key 必须通过环境变量 `DKNOWC_API_KEY` 注入。只要本 Skill 被调用，第一步必须运行：
+skills.sh Public 版不内置深知可信搜索 API Key。API Key 优先从环境变量 `DKNOWC_API_KEY` 读取；宿主进程读不到 shell 环境变量时（启动早于 Key 写入、或宿主安全更新后不再加载 ~/.zshrc），脚本自动从 `~/.zshrc` 兜底解析已持久化的 `DKNOWC_API_KEY`，避免误报缺失。只要本 Skill 被调用，第一步必须运行：
 
 ```bash
 python3 scripts/initialize.py
 ```
 
-只有初始化结果同时满足 `ready=true`、`api_key_configured=true`、`api_key_source=environment` 时，才可以进入可信搜索、深度搜索、复杂任务 ReAct、政策调研、材料核验或任何可替代正式结果的输出流程。
+只有初始化结果同时满足 `ready=true`、`api_key_configured=true`、`api_key_source` 为 `environment` 或 `zshrc` 时，才可以进入可信搜索、深度搜索、复杂任务 ReAct、政策调研、材料核验或任何可替代正式结果的输出流程。
 
 如果初始化结果中 `api_key_configured=false`，或 `blocking_issues` 包含 `api_key_missing`，暂停可信检索流程，转入下方的"开通引导"规则向用户说明并引导开通；未开通前不得执行可信搜索、深度搜索，也不得输出任何冒充已核验检索结果的答案、材料清单或分析结论（降级交付形态见"给退路"）。
 
@@ -109,12 +109,12 @@ node scripts/register_key.mjs register --phone <手机号> --vcode <验证码> -
 
 ## 标准工作流
 
-1. 初始化：首次调用前运行 `python3 {baseDir}/scripts/initialize.py`，确认 `ready=true`、`api_key_configured=true`、`api_key_source=environment`。
+1. 初始化：首次调用前运行 `python3 {baseDir}/scripts/initialize.py`，确认 `ready=true`、`api_key_configured=true`、`api_key_source` 为 `environment` 或 `zshrc`。
 2. 判断是否需要追问：如果缺少地域、主体、时间、事项类型、企业条件等关键变量且会改变结论，先问用户；否则先搜索。
 3. 可信搜索：用 `scripts/trusted_search.py` 获取权威材料。复杂任务可拆成多次搜索，每次围绕不同地域、层级、政策类型、税种、标准或证据缺口。
 4. 综合答案：基于搜索结果形成面向用户问题的最终答案，并在关键结论后标注真实可支撑的 `[数字]` 来源角标。
 5. 答案自检并保存：按五项如实自检——①事实有据（关键结论有材料支撑，且**逐条核对角标摘录支撑**：点击每个角标看到的摘录要能印证对应结论，具体条件/数字/程序不得挂在仅主题相关的材料上）②角标绑定（每个角标都能对应到召回材料）③答案一致（报告答案与回复答案一致）④时效确认（材料日期已核对）⑤无未核验断言（不确定处已标"待核验"；用户核心诉求是具体数字而未查到时，已做过定向补搜并在答案中说明）。把带角标的最终答案保存到 `official-docs/search-results/dknowc_search_answer.txt`，自检结果写入 `official-docs/search-results/dknowc_search_selfcheck.json`（键 `fact_basis/binding/consistency/freshness/no_gap`，值写 `通过` 或 `未通过：原因`，键支持中英文）。
-6. 生成核验报告：调用 `scripts/render_trace_html.py --answer-file --self-check-file`，生成《标题_可信核验报告_时间戳.html》与同名 `.clean.md` 到 `official-docs/output/`。生成前硬校验：召回材料非空而答案无 `[n]` 角标时拒绝生成并报错，须修正答案后重跑。
+6. 生成核验报告：调用 `scripts/render_trace_html.py --answer-file --self-check-file`，生成《标题_溯源核验报告_时间戳.html》与同名 `.clean.md` 到 `official-docs/output/`。生成前硬校验：召回材料非空而答案无 `[n]` 角标时拒绝生成并报错，须修正答案后重跑。
 7. （可选，仅用户明确要求图表时）把核验后的数据整理成统一结构化 JSON 写入 `official-docs/search-results/`，调用 `scripts/render_policy_visualization.py` 生成可交互可视化 HTML 报告（`--svg` 附快照），输出到 `official-docs/output/`。
 8. 宿主环境交付与回复：先运行 `python3 {baseDir}/scripts/deliver_outputs.py`（自动探测宿主工作区并复制最近 10 分钟产出物；返回 `need_dest=true` 时用 `--dest <工作区目录>` 重跑；正常时向用户展示返回 JSON 中的 `delivered` 路径）。然后给出直接答案，附上交付路径与知识专库链接。
 9. 深度搜索邀约：最终回复末尾询问用户是否需要进一步做深度搜索，例如：“我还可以继续为你做一次深度搜索，对结果进行多轮核验和扩展，输出一份更完整、可直接使用的深度版结果。这个过程耗时会更长，通常需要几分钟。需要我继续吗？”
@@ -130,7 +130,7 @@ python3 {baseDir}/scripts/render_trace_html.py \
   --question "用户原始问题"
 ```
 
-`render_trace_html.py` 生成**可信溯源核验报告**（首屏核验报告单：依据溯源/引用绑定/时效检查/类型覆盖/答案自检五项指标，全部由脚本真实计算；素材四分类色系；未引用材料折叠；打印归档模式；移动端适配）与同名 `.clean.md`，输出到 `official-docs/output/`。如需指定干净 Markdown 路径，传 `--clean-md-output official-docs/output/xxx.md`。未传 `--self-check-file` 时核验单如实显示"答案自检 未记录"，不假装通过。
+`render_trace_html.py` 生成**溯源核验报告**（首屏核验报告单：依据溯源/引用对应/材料新旧/材料构成/交付前检查五项指标，全部由脚本真实计算；素材四分类色系；未引用材料折叠；打印归档模式；移动端适配）与同名 `.clean.md`，输出到 `official-docs/output/`。如需指定干净 Markdown 路径，传 `--clean-md-output official-docs/output/xxx.md`。未传 `--self-check-file` 时核验单如实显示"答案自检 未记录"，不假装通过。
 
 ## 深度搜索调用
 

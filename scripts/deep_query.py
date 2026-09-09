@@ -214,6 +214,13 @@ def main() -> None:
         os.environ.get("DKNOWC_API_KEY"),
     )
     if not api_key:
+        # 宿主进程读不到 shell 环境变量时，从 ~/.zshrc 兜底解析已持久化的 Key
+        try:
+            from api_key import resolve_api_key
+            api_key, _source = resolve_api_key()
+        except ImportError:
+            pass
+    if not api_key:
         print("错误：缺少 api_key，请配置环境变量 DKNOWC_API_KEY。", file=sys.stderr)
         sys.exit(2)
 
