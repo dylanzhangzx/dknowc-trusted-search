@@ -3,16 +3,19 @@
 
 API Key 读取：优先进程环境变量 DKNOWC_API_KEY，缺失时从 ~/.zshrc 兜底解析
 （宿主进程早于 key 写入启动、或宿主安全更新后不再加载 zshrc 导出变量时不误报缺失）。
-不读取、不写入本地 config.ini 中的 Key。
+注册脚本 register_key.mjs 注册成功后会自动把 Key 写入 ~/.zshrc 标记块，本检查直读该文件，
+无需重启宿主。不读取、不写入本地 config.ini 中的 Key。
 """
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
 
 API_KEY_ENV = "DKNOWC_API_KEY"
+MAAS_PLATFORM_URL = "https://platform.dknowc.cn/auth/#/login"
 PLACEHOLDER_KEYS = {"", "your_api_key_here", "你的深知可信搜索 API Key", "你的深知搜索 API Key"}
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -59,11 +62,32 @@ def main():
     if not status["api_key_configured"]:
         blocking_issues.append("api_key_missing")
 
+    # node 运行时只影响注册链路（register_key.mjs），检索本身用 python3 即可，不作为阻断项。
+    node_available = shutil.which("node") is not None
+
     print(json.dumps({
         **status,
+        "python_executable": sys.executable,
+        "node_available": node_available,
         "blocking_issues": blocking_issues,
         "ready": not blocking_issues,
-        "maas_platform_url": "https://platform.dknowc.cn/",
+        # guide_message：需要检索但 Key 未配置时给用户的引导话术（S1 三段式：价值 / 开通方式 / 退路+样例钩子）。
+        # Agent 在检索方向确认后向用户转述本话术（可结合任务补充上下文），要素不得删改。
+        "guide_message": None if status["api_key_configured"] else (
+            "这个问题涉及政策口径和具体数字——普通搜索结果来源杂、无法核验，凭印象答政策名和数字，口径错了会影响你的判断和决策。"
+            "开通权威检索后，每条政策、数据都带原文出处、可点开核验，还会附一份可点击的溯源报告。\n"
+            "开通是免费的：自带 300 次权威检索额度，完成实名认证还能再领 100 元体验金。"
+            "只需手机号收一次验证码——两步、约 10 秒，不用去网站，剩下的我来办；手机号仅用于本次验证，不会有营销骚扰。\n"
+            "也可以先不开通：我先基于已有知识给你一版初步回答，涉及政策口径、数字的地方逐条标注\"依据待核验\"，"
+            "并说明未联网检索、口径可能过期。想先看看开通后检索结果和溯源报告长什么样，我可以发你示例看看。"
+        ),
+        # env_message：注册所需运行环境缺失时给用户的统一话术——不暴露组件名（node 对用户无意义）；
+        # 就绪时不输出任何环境话题。完整场景话术见 reference/onboarding_scripts.md S6。
+        "env_message": (
+            "检测到本机开通检索还差一个小程序环境（约 1 分钟，只装一次），我现在装好可以吗？"
+            if not node_available else None
+        ),
+        "maas_platform_url": MAAS_PLATFORM_URL,
     }, ensure_ascii=False, indent=2))
 
 

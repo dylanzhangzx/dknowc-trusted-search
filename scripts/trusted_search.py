@@ -21,6 +21,62 @@ DEFAULT_ENDPOINT = "https://open.dknowc.cn/dependable/search"
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 SEARCH_RESULTS_DIR = SKILL_ROOT / "official-docs" / "search-results"
 
+# 余额/额度用尽的判定：HTTP 状态与业务错误消息双路径。
+# 命中后返回 quota_exhausted=true，Agent 必须停止重试并引导用户到 MaaS 处理，不得反复调用。
+# 错误码语义按接口文档区分：401=密钥校验失败（可能失效，需重新获取）；403=接口无权限（密钥类型不符）；
+# 402=余额类。429 接口文案为"繁忙/限流/余额不足"三义混合、无法归因——现阶段全部按额度用尽处理
+# （2026-09-10 产品决策），待后端把服务端问题与余额拆分为不同错误码后再调整回区分逻辑。
+MAAS_PLATFORM_URL = "https://platform.dknowc.cn/auth/#/login"
+QUOTA_EXHAUSTED_HTTP_CODES = {402, 429}
+QUOTA_EXHAUSTED_KEYWORDS = (
+    "余额不足", "额度不足", "额度已用完", "额度已用尽", "体验额度已用完",
+    "余额已不足", "欠费", "quota", "insufficient", "balance", "exceeded",
+)
+
+
+def detect_quota_exhausted(status_code=None, errmsg=None):
+    """判断本次接口失败是否由余额/额度用尽引起。"""
+    if status_code in QUOTA_EXHAUSTED_HTTP_CODES:
+        return True
+    if errmsg:
+        lowered = str(errmsg).lower()
+        if any(kw in lowered for kw in QUOTA_EXHAUSTED_KEYWORDS):
+            return True
+    return False
+
+
+def user_message_for_error(status_code=None, quota_exhausted=False):
+    """按错误类型返回给用户的固定话术（Agent 必须原样转述，不得改写后发挥）。"""
+    if quota_exhausted:
+        return (f"检索调不动，很可能是额度用完了：到 {MAAS_PLATFORM_URL} 看一下额度，"
+                "完成实名认证可以领 100 元体验金。")
+    if status_code == 401:
+        return "访问密钥校验没通过（密钥可能已失效），我重新获取一下密钥；还不行的话需要重新验证手机号。"
+    if status_code == 403:
+        return (f"当前密钥没有检索权限（可能类型不符或已变更）。到 {MAAS_PLATFORM_URL} 查看密钥权限，"
+                "或重新验证手机号获取新密钥。")
+    if status_code == 500:
+        return "检索服务暂时异常，我稍后再试；持续异常的话先基于已有检索结果整理回答，关键依据标注'依据待核验'。"
+    return "检索暂时没连上（网络波动），稍等我再试一次；持续失败的话先基于已有检索结果整理回答，关键依据标注'依据待核验'。"
+
+
+def _fail_request(stage: str, reason: str, status_code=None, errmsg=None):
+    """请求失败时输出结构化错误（含 user_message 固定话术）并退出。"""
+    quota = detect_quota_exhausted(status_code, errmsg)
+    retry_forbidden = quota or status_code == 403
+    print(f"错误：{reason}", file=sys.stderr)
+    print(json.dumps({
+        "status": "error",
+        "stage": stage,
+        "status_code": status_code,
+        "quota_exhausted": quota,
+        "retry_forbidden": retry_forbidden,
+        "user_message": user_message_for_error(status_code, quota),
+        "maas_platform_url": MAAS_PLATFORM_URL,
+    }, ensure_ascii=False))
+    sys.exit(1)
+
+
 
 def resolve_output_json(output_path: str) -> Path:
     """把搜索结果 JSON 落到 official-docs/search-results/，阻断路径遍历。"""
@@ -116,14 +172,11 @@ def _post(url: str, api_key: str, payload: Dict[str, Any], timeout: int) -> Dict
             text = resp.read().decode("utf-8", errors="replace").replace("\x00", "")
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="ignore")
-        print(f"错误：HTTP {e.code} {detail or e.reason}", file=sys.stderr)
-        sys.exit(1)
+        _fail_request("http", f"HTTP {e.code} {detail or e.reason}", status_code=e.code, errmsg=detail)
     except urllib.error.URLError as e:
-        print(f"错误：网络请求失败 - {e.reason}", file=sys.stderr)
-        sys.exit(1)
+        _fail_request("network", f"网络请求失败 - {e.reason}")
     except socket.timeout:
-        print("错误：可信搜索接口请求超时。", file=sys.stderr)
-        sys.exit(1)
+        _fail_request("timeout", "可信搜索接口请求超时")
 
     try:
         body = json.loads(text)
@@ -199,8 +252,18 @@ def _print_summary(body: Dict[str, Any], max_articles: int, max_paragraphs: int,
     code = content.get("code")
     msg = content.get("msg")
     if code and code != 200:
+        quota = detect_quota_exhausted(None, msg)
         print(f"错误：可信搜索接口返回 {code} {msg or ''}".strip())
-        return
+        print(json.dumps({
+            "status": "error",
+            "stage": "biz",
+            "biz_code": code,
+            "quota_exhausted": quota,
+            "retry_forbidden": quota,
+            "user_message": user_message_for_error(None if code != 500 else 500, quota),
+            "maas_platform_url": MAAS_PLATFORM_URL,
+        }, ensure_ascii=False))
+        sys.exit(1)
 
     data = _data(body)
     if not data:

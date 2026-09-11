@@ -25,21 +25,20 @@ python3 scripts/initialize.py
 
 当前版本统一通过环境变量 `DKNOWC_API_KEY` 注入 Key，不再扫描或复用其他深知系列 Skill 的本地 `config.ini`，业务调用脚本也不再读取本地配置文件或传入 `szUserId`。如当前环境变量未配置：
 
-- 可运行 `scripts/register_key.mjs` 发送验证码并注册/查回 Key。
-- `register_key.mjs` 只返回 Key，不持久化保存 Key。
-- 当前任务拿到 Key 后可临时注入 `DKNOWC_API_KEY` 并继续执行。
-- 任务完成后，Agent 询问用户是否需要持久化 `DKNOWC_API_KEY`；用户同意后再单独处理。
-- MaaS 管理平台地址：`https://platform.dknowc.cn/`
+- 可运行 `scripts/register_key.mjs` 发送验证码并注册/查回 Key（send/register 各分支输出 `user_message` 固定话术，Agent 必须原样转述）。
+- 注册成功后，脚本自动把 Key 以标记块形式写入 `~/.zshrc`（幂等替换，权限 0600；`--no-zshrc` 跳过）；业务脚本与 `initialize.py` 直读该文件，无需重启宿主。
+- 返回的 `apiKey` 同时供当前任务临时注入 `DKNOWC_API_KEY` 继续执行。
+- MaaS 平台登录页：`https://platform.dknowc.cn/auth/#/login`
 
-## 开通引导（1.1.3 起）
+## 开通引导（1.2.1 起固定话术）
 
-初始化检测到 Key 未配置时，按 SKILL.md「启动初始化 · 开通引导规则」引导用户开通：先价值后验证（先说明权威检索对当前问题的价值，再提出手机号验证，禁止开口就要手机号）、引导时机后移、安全边界说明（不点名具体平台）、用户拒绝时给退路（基于模型已有知识给出逐条标注"依据待核验"的初步回答，明确说明未联网检索，不生成溯源 HTML 与干净 Markdown）、回答交付后轻提示（每任务最多一次）。能力素材与分场景话术见 `reference/search_intro.md`；用户犹豫或询问效果时，用 `reference/sample_search_result.md` 与 `reference/sample_trace_report.html` 展示检索结果和溯源报告效果（两文件均为示例数据，仅供展示，不得作为交付物）。
+初始化检测到 Key 未配置时输出 `guide_message`（S1 三段式：价值 / 权益+开通方式 / 退路+样例钩子），Agent 优先原样转述；注册漏斗与报错场景的完整固定话术见 `reference/onboarding_scripts.md`（S1-S6 场景话术、注册与搜索链路报错对照表、FAQ、通用禁则）。核心纪律：引导前禁示（确认前不得输出"已核实/已查到"类内容）、权益前置（300 次免费额度 + 实名认证赠金在引导时告知）、退路唯一（"依据待核验"标注，禁止承诺联网检索替代）、手机号全程脱敏。用户犹豫或询问效果时，用 `reference/sample_search_result.md` 与 `reference/sample_trace_report.html` 展示检索结果和溯源报告效果（两文件均为示例数据，仅供展示，不得作为交付物）。
 
 ## 接口地址
 
 - 可信搜索接口：`https://open.dknowc.cn/dependable/search`
 - 深度搜索接口：`https://open.dknowc.cn/api/services/deep-query/v3`（非流式，请求体字段 `query`，`areas` 支持多地域）
-- MaaS 管理平台：`https://platform.dknowc.cn/`
+- MaaS 平台登录页：`https://platform.dknowc.cn/auth/#/login`
 
 ## 工作区与产物约定
 
