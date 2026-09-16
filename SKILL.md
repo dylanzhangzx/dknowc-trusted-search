@@ -7,7 +7,7 @@ description: "当用户需要可信搜索、权威材料检索、政策法规/�
 description_zh: "深知可信搜索（法律、政策、标准）是由北京彩智科技有限公司旗下“深知可信智能”提供的可信搜索与权威材料检索 Skill，面向政策法规、政务办事依据、税务社保、公积金、企业补贴、资质证照、行业标准、公共服务、合规义务、政策调研、城市政策对比和企业投资/技改/税惠材料核验等工作场景。默认调用可信搜索接口，按需调用深度搜索接口，输出带权威来源、知识专库、可点击溯源 HTML 和干净 Markdown 的结果。"
 description_en: "dknowc trusted search is a trusted search and authoritative-source retrieval Skill provided by dknowc Trusted Intelligence under Beijing Caizhi Technology Co., Ltd. It supports policy, regulation, government-service evidence, standards, compliance, subsidy, tax-benefit and policy research tasks. It defaults to trusted search, uses deep search only on explicit user request or confirmation, and delivers a direct answer, clickable provenance HTML, and clean Markdown without citation markers."
 category: "office-efficiency"
-version: 1.2.1
+version: 1.3.0
 author: 彩智科技
 permissions:
   network:
@@ -38,7 +38,7 @@ secrets:
 - **关键数字不得用"以官方为准"搪塞**：用户问题的核心就是具体数字（金额、比例、期限、倍数、标准）而首轮检索只返回框架性内容时，必须再做定向补充检索（在 query 中加入"管理办法""实施细则""办理指南""申报通知"或具体区县名等）后回答；仍查不到具体数字才可写"以各区最新细则为准"，并同时给出已查到的最接近口径与其出处。
 - 不得伪造、误配或泛配角标。找不到直接依据时，应删除该结论、标为“待核验/需以主管部门口径为准”，或继续搜索补证。
 - 聊天回复默认不堆大量材料裸链接；保留核心结论、必要来源摘要、知识专库链接、核验报告路径和干净 Markdown 路径。
-- 交付状态纪律：核验报告必须以"已核验"状态交付。答案角标编号无需人工控制（渲染器自动按首次出现顺序重排为 [1][2][3]…）；被引用材料必须可回看（有原文链接，或经知识专库回看），缺少原文链接时优先换绑有链接的同类材料再生成。渲染脚本报错（答案无角标 / 角标未绑定材料）属于必须修正的错误：修答案、重跑、再交付。除用户明确知情接受外，禁止把"核验未通过"或带红色警示的报告交付给用户；确属不可抗力（如权威材料无原文链接但知识专库可回看）交付时在回复中口头说明即可，报告内以温和提示呈现。
+- 交付状态纪律：核验报告的正常结论即为"核验完成"（绿），必须以该状态交付。答案角标编号无需人工控制（渲染器自动按首次出现顺序重排为 [1][2][3]…）。缺原文链接属接口数据源覆盖问题而非核验工作缺失：渲染器自动处理（链接活性检测 + 存档快照兜底 + 知识专库回看通道 + 黄色提醒），不拖垮核验结论；确需人工处理的是**缺摘录**（正文依据无可比对原文）——换绑有摘录的同类材料再生成。渲染脚本报错（答案无角标 / 角标未绑定材料）属于必须修正的错误：修答案、重跑、再交付。除用户明确知情接受外，禁止把"核验未通过"或带红色警示的报告交付给用户。
 - 用户明确说“不要 HTML/不要文件”时，才跳过文件交付；否则 HTML 和干净 Markdown 是最终交付的一部分。
 
 ## 启动初始化
@@ -121,7 +121,13 @@ python3 {baseDir}/scripts/render_trace_html.py \
   --question "用户原始问题"
 ```
 
-`render_trace_html.py` 生成**溯源核验报告**（首屏核验报告单：依据溯源/引用对应/材料新旧/材料构成/交付前检查五项指标，全部由脚本真实计算；素材四分类色系；未引用材料折叠；打印归档模式；移动端适配）与同名 `.clean.md`，输出到 `official-docs/output/`。如需指定干净 Markdown 路径，传 `--clean-md-output official-docs/output/xxx.md`。未传 `--self-check-file` 时核验单如实显示"答案自检 未记录"，不假装通过。
+`render_trace_html.py` 生成**溯源核验报告**（1.3.0 起按公文写作 3.7.0 重构，对齐深知晓原型）与同名 `.clean.md`，输出到 `official-docs/output/`：
+
+- **双视图**：核验报告视图（核验报告单 + 正文分节卡）与材料专库视图（全屏：大搜索 + 热词真实计算 + 检索分组 tabs + 已引用/未引用筛选 + 单列宽卡）；顶栏"只看正文 / 复制全文（按文档流顺序去角标纯文本）/ 打印归档（只打印正文 / 完整归档含材料附录）"。
+- **正文形态**：章节标题 + 句后引文胶囊（编号徽章 + 材料标题），点击胶囊原地展开溯源卡（多段分块原文摘录 + 面包屑标题链 + 查看全文），再点收起；同一段落内同一材料只保留最后一处角标与胶囊。每章标题右侧标注"本章引用 N 处 · 已核验"。角标按首次出现顺序自动重排为 1..N。
+- **核验报告单**：五项指标（依据溯源/引用对应/材料新旧/材料构成/交付前检查）全部真实计算；正常结论即"核验完成"（绿）——缺原文链接属接口数据源覆盖问题，黄色提醒不拖垮结论；缺摘录仍计为未通过。
+- **生成前预处理**（内置）：policyFiles 发文字号按标题本地匹配（材料卡显示"文号 · 数据源 · 日期"）；原文链接活性检测（HTTP 404/410 + 软 404 标题嗅探，连接失败/403 保守放行，失效链接不再展示）；存档快照兜底（原文失效时"查看存档全文"，/A/ 路径容错 + 格式校验）；缺链材料自动挂知识专库链接作回看通道。链接检测默认开启（约 10 秒），`--skip-link-check` 跳过；`--no-snapshot` 关闭快照兜底；如需指定干净 Markdown 路径，传 `--clean-md-output official-docs/output/xxx.md`。
+- 未传 `--self-check-file` 时核验单如实显示"答案自检 未记录"，不假装通过。
 
 ## 深度搜索调用
 
@@ -177,7 +183,7 @@ skills.sh Public 版 API Key 统一且只通过环境变量 `DKNOWC_API_KEY` 注
 - `know_base`：默认 `true`，用于返回知识专库链接。
 - `return_full_content`：默认 `false`。
 - `segment_count`：默认 `2`。
-- `simplified`：默认 `true`。
+- `simplified`：默认 `false`（对齐公文写作，返回完整材料集并携带存档快照 `screenShotPath`）；`--simplified` 开启精炼输出（材料更少且**丢失快照字段**，需要生成核验报告时不要使用）。
 
 深度搜索配置：
 
