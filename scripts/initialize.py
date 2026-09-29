@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """深知可信搜索 SkillHub / WorkBuddy public 版初始化检查。
 
-API Key 读取：优先进程环境变量 DKNOWC_API_KEY，缺失时从 ~/.zshrc 兜底解析
-（宿主进程早于 key 写入启动、或宿主安全更新后不再加载 zshrc 导出变量时不误报缺失）。
-注册脚本 register_key.mjs 注册成功后会自动把 Key 写入 ~/.zshrc 标记块，本检查直读该文件，
-无需重启宿主。不读取、不写入本地 config.ini 中的 Key。
+API Key 读取：优先进程环境变量 DKNOWC_API_KEY，缺失时从本机专用配置文件
+~/.config/dknowc/api_key 读取，历史 ~/.zshrc Key 块作为迁移期兜底
+（宿主进程早于 key 写入启动、或宿主安全更新后不再加载 shell 导出变量时不误报缺失）。
+注册脚本 register_key.mjs 注册成功后自动把 Key 写入专用配置文件并清理历史 zshrc 块，
+本检查直读该文件，无需重启宿主。不读取、不写入本地 config.ini 中的 Key。
 """
 
 import json
@@ -27,7 +28,7 @@ def _looks_like_key(value: str) -> bool:
 
 
 def check_api_key_config():
-    # 环境变量优先，缺失时从 ~/.zshrc 兜底解析
+    # 环境变量优先，缺失时从专用配置文件读取，历史 zshrc 兜底
     api_key = ""
     source = ""
     try:
