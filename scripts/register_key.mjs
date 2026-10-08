@@ -299,7 +299,7 @@ async function main() {
     // 3.7.5：不再写 ~/.zshrc，避免污染 shell 配置；读取顺序 env→配置文件→历史 zshrc 兜底）。
     // --no-persist 可跳过；persist 命令保留用于事后手动补持久化。
     // user_message：给用户的固定话术，Agent 必须原样转述，不得改写后发挥。
-    // 权益告知（300 次额度 + 实名认证赠金）已前移到开通引导（initialize.guide_message / onboarding_scripts S1），
+    // 权益告知（注册赠送 10 万积分 + 实名认证再送 10 万积分）已前移到开通引导（initialize.guide_message / onboarding_scripts S1），
     // 此处只做轻确认，避免成功节点信息过重导致转述截断。
     const cfgWrite = ok && apiKeyToSave && !args["no-persist"]
       ? writeApiKeyToConfigFile(apiKeyToSave)
@@ -307,8 +307,8 @@ async function main() {
     let userMessage;
     if (ok && apiKeyToSave) {
       userMessage = Boolean(data.existed)
-        ? `这个手机号之前开通过，已直接找回原来的密钥和额度，不用重新注册。我马上开始检索。`
-        : `开通成功，访问密钥已写入本机，300 次免费检索额度已生效。我马上开始检索。`;
+        ? `这个手机号之前开通过，已直接找回原来的密钥和积分，不用重新注册。我马上开始检索。`
+        : `开通成功，访问密钥已写入本机，注册赠送的 10 万积分已到账。我马上开始检索。`;
       if (newKeyError) {
         userMessage += ` 另外你要求的新密钥生成失败（${newKeyError}），已先沿用现有密钥继续，不影响使用；需要的话稍后再重新生成。`;
       }
