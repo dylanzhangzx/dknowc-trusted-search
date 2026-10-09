@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """可信溯源核验报告渲染器：把搜索结果 JSON + 最终答案渲染为单文件可核验 HTML。
 
-深知可信搜索 SkillHub 版（对齐深知公文写作 3.7.0 渲染层，数据口径保持自有与真实）。
+深知可信搜索 SkillHub 版（渲染层与深知系列核验报告同构，数据口径保持自有与真实）。
 输入直读 trusted_search.py / deep_query.py 的 --json-only 输出（可信搜索 content.data
 或深度搜索 deep-query/v3 格式），正文用 --answer-file 传入最终答案（关键结论带 [n] 角标），
 成稿自检用 --self-check-file 传入五项结果。
@@ -15,9 +15,9 @@
 - 核验报告视图（默认）：核验报告单 + 正文分节卡；角标点击跳知识专库定位
 - 知识专库视图（全屏）：大搜索 + 热词（标题/正文高频词真实计算）+ 检索分组 tabs + 材料卡
 三个核验层次：报告级（核验报告单）／材料级（来源卡核验链标记）／引用级（角标一一绑定）。
-诚实原则：脚本真实计算的结果才打勾；无法自动判定的项不虚构展示（"现行效力"人工复核提示行已按产品要求移除，对齐公文写作 3.7.2）。
+诚实原则：脚本真实计算的结果才打勾；无法自动判定的项不虚构展示（"现行效力"人工复核提示行已移除，2026-09-19 起）。
 生成前预处理（内置）：policyFiles 发文字号本地匹配、存档快照兜底（screenShotPath /A/ 容错 + 格式校验；
-原文链接原样进报告、不做活性探测——2026-10-08 对齐公文 3.7.8，--skip-link-check 保留为兼容 no-op），
+原文链接原样进报告、不做活性探测——2026-10-08 起，--skip-link-check 保留为兼容 no-op），
 --no-snapshot 关闭）；缺原文链接不拖垮核验结论，按提醒呈现。
 布局为单文件静态 HTML；打印归档模式单栏全展开并附材料附录。
 所有输入输出经路径安全层限制在 skill 工作区 official-docs/ 内。
@@ -156,7 +156,7 @@ def strip_citation_markers(text: str) -> str:
 SNAPSHOT_ENABLED = True
 
 def normalize_snapshot_url(url: str) -> str:
-    """快照路径容错：接口部分返回值缺 /A/ 层级（公文版实测 60 条中 5 条，补全后即可访问），
+    """快照路径容错：接口部分返回值缺 /A/ 层级（实测 60 条中 5 条，补全后即可访问），
     统一规范化为 https://attach.dknowc.cn/snapshot/A/<2位>/<2位>/<哈希>.jpg。"""
     u = (url or "").strip()
     if u.startswith("https://attach.dknowc.cn/snapshot/") and "/snapshot/A/" not in u:
@@ -200,7 +200,7 @@ def attach_doc_numbers(articles: List[Dict[str, Any]], payload: Dict[str, Any]) 
     新闻/解读类不在 policyFiles 中（本就无文号），匹配不上则不显示。
     检索库对同一政策文件常有多个抓取变体（新闻稿版/发文版，文号挂在发文版条目上），
     标题精确匹配不上时**不做模糊猜测**（宁缺勿错）——变体识别与回填由 SKILL.md
-    选材规则执行：Agent 引用政策文件时优先带文号的发文版条目（对齐公文写作 3.7.2）。
+    选材规则执行：Agent 引用政策文件时优先带文号的发文版条目。
     """
     doc_numbers: Dict[str, str] = {}
     for holder in (payload.get("content") if isinstance(payload.get("content"), dict) else {},
@@ -232,8 +232,7 @@ def preprocess_articles(articles: List[Dict[str, Any]], payload: Dict[str, Any],
 
     直接改写文章 dict（注入 文号 / 快照链接 字段），供 source_from_article 读取；
     均为幂等操作，多轮渲染不叠加。
-    原文链接活性检测已整体移除（2026-10-08 对齐公文 3.7.8 / 徐总 10-06 指示
-    "不要在SKILL中做链接连通性检测，直接给结果"）——接口返回的链接原样进报告；
+    原文链接活性检测已整体移除（2026-10-08 起）——接口返回的链接原样进报告；
     skip_link_check 参数保留为兼容 no-op。
     """
     attach_doc_numbers(articles, payload)
@@ -527,9 +526,8 @@ def extract_sources(payload: Dict[str, Any],
         # 一篇材料一张卡：段落合并为摘录（paragraph_text 拼接全部段落），不按段落拆卡——
         # 溯源 JSON 的 materials 与正文角标按"材料"粒度一一对应，拆段会使编号错位。
         source = source_from_article(item, len(sources) + 1)
-        # 去重键（2026-10-08 对齐公文 3.7.8 修复）：归一化「标题+URL」。旧键含 id（递增
-        # 序号每条不同）等于从不去重——同一篇文章跨提取器/多段片段全部出卡（徐总 10-05
-        # 实测《医疗保障法》同名卡片 ×17 的主因）。单边缺失退用其一，均缺失退摘录前缀。
+        # 去重键（2026-10-08 修复）：归一化「标题+URL」。旧键含 id（递增序号每条不同）
+        # 等于从不去重——同一篇文章跨提取器/多段片段全部出卡（实测曾出现同名卡片 ×17）。单边缺失退用其一，均缺失退摘录前缀。
         t_key = re.sub(r"\s+", "", source["title"] or "")
         u_key = (source["url"] or "").strip().rstrip("/")
         if u_key == "接口未返回":
@@ -682,7 +680,7 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
     no_citation = bool(sources) and not cited
 
     # ③ 时效检查：材料日期范围与历史材料计数
-    # ③ 时效只统计**正文依据**（2026-09-29，对齐公文 3.7.6）：sources 含未引用召回材料，
+    # ③ 时效只统计**正文依据**（2026-09-29 起）：sources 含未引用召回材料，
     # 此前误用全集，未引用材料里的异常日期（如接口标注的未来年份）会写进交付物口径。
     dated = [parse_year_month(s.get("date")) for s in cited_sources]
     dated = [d for d in dated if d]
@@ -721,7 +719,7 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
 
     trace_ok = cited_sources and not missing_excerpts
     binding_ok = (not unbound) and not no_citation
-    # 自检显式"未通过"纳为报告级否决项（对齐公文写作 3.7.4）：不能自检失败还顶部打绿章。
+    # 自检显式"未通过"纳为报告级否决项：不能自检失败还顶部打绿章。
     self_check_ok = self_check["status"] != "fail"
     overall_passed = bool(trace_ok and binding_ok and self_check_ok)
 
@@ -738,7 +736,7 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
         reasons.append(f"有 {len(missing_links)} 条正文依据没有原文链接或存档快照，无法回看")
 
     if overall_passed and missing_links:
-        # 摘录可比对、结论成立，但确有材料无回看通道时，顶部表述要与事实一致（对齐 3.7.4）
+        # 摘录可比对、结论成立，但确有材料无回看通道时，顶部表述要与事实一致
         overall_label = f"核验完成，其中 {len(missing_links)} 条依据无原文或存档快照可回看"
     else:
         overall_label = "核验完成，正文依据逐条对过原文" if overall_passed else "核验未完全通过"
@@ -1110,14 +1108,14 @@ def build_chip_data(sources: List[Dict[str, str]]) -> Dict[str, Dict[str, str]]:
 
 def render_source_links(url: str, policy_url: str = "", snapshot: str = "") -> str:
     """链接区：原文可回看 / 无源网址但有快照。接口返回的链接原样展示（不做活性探测，
-    2026-10-08 对齐公文 3.7.8）；快照是接口对原文的存档副本，文案如实标注。"""
+    2026-10-08 起）；快照是接口对原文的存档副本，文案如实标注。"""
     links = []
     if url and url != "接口未返回":
         links.append(f'<a href="{esc(url)}" target="_blank" rel="noopener">查看全文 ↗</a>')
     if snapshot:
         # 有哪个显示哪个：快照统一展示"查看存档全文"，不做原文失效的状态解释
         links.append(f'<a class="snap" href="{esc(snapshot)}" target="_blank" rel="noopener">查看存档全文 ↗</a>')
-    # 回看通道只有原网址与快照（2026-09-29 用户决策：外链知识专库属老能力，已移除）
+    # 回看通道只有原网址与快照（2026-09-29 起：外链知识专库属老能力，已移除）
     if not links:
         return ""
     return '<div class="sc-links">' + "".join(f"<span>{link}</span>" for link in links) + "</div>"
@@ -1143,7 +1141,7 @@ def render_verify_panel(v: Dict[str, Any]) -> str:
                    f'<span class="d">每条素材摘录可比对，原文或存档快照可回看</span></div>')
     elif tr["passed"] == tr["total"]:
         # 摘录齐全但有材料没有回看通道：不得照写"原文或存档快照可回看"
-        # （对齐公文写作 3.7.4：此前 missing_links 算出却从未参与结论，属虚假背书）
+        # （此前 missing_links 算出却从未参与结论，属虚假背书）
         tr_html = (f'<div class="vi"><span class="s warn">◐ 依据溯源 {tr["passed"]}/{tr["total"]}</span>'
                    f'<span class="d">摘录可比对，其中 {n_no_link} 条没有原文链接或存档快照、无法回看</span></div>')
     else:
@@ -1170,13 +1168,13 @@ def render_verify_panel(v: Dict[str, Any]) -> str:
     fr = v["freshness"]
     if fr:
         rng = f"{fr['min'][0]}-{fr['min'][1]:02d}～{fr['max'][0]}-{fr['max'][1]:02d}"
-        # 2026-09-29（对齐公文 3.7.6）：去掉"N 条年头较久，按参考口径使用"——对长期有效的
+        # 2026-09-29 起：去掉"N 条年头较久，按参考口径使用"——对长期有效的
         # 政策法规偏严，且"按参考口径使用"读者无从理解；old_count 仍照常计算留待后续。
         fr_html = f'<div class="vi"><span class="s ok">✓ 材料新旧 已核</span><span class="d">材料日期 {esc(rng)}</span></div>'
     else:
         fr_html = '<div class="vi"><span class="s none">— 材料新旧 未记录</span><span class="d">材料没标发布日期</span></div>'
 
-    # 材料构成：材料类型（政策依据型/数据支撑型/…）是公文写作的四分类，可信搜索接口不返回该字段
+    # 材料构成：材料类型四分类（政策依据型/数据支撑型/…）非本检索接口返回字段
     # → 没有类型数据时**整行不显示**，不再渲染"材料没标类型"这种永远为空的占位行（2026-09-28 修复）。
     cov = v["coverage"]
     parts = [f"{KIND_CATALOG[k][0]} {cov[k]}" for k in ("policy", "data", "case", "reference") if cov.get(k)]
@@ -1204,7 +1202,7 @@ def render_verify_panel(v: Dict[str, Any]) -> str:
     else:
         sc_html = '<div class="vi"><span class="s none">— 交付前检查 未记录</span><span class="d">本次溯源 JSON 没写入检查结果</span></div>'
 
-    # "现行效力"人工复核提示行已按产品要求移除（对齐公文写作 3.7.2，2026-09-19）：
+    # "现行效力"人工复核提示行已移除（2026-09-19 起）：
     # 政策是否现行有效无法自动判定，此提示对用户无操作价值；policy_count 仅保留在计算层不再展示。
     manual = ""
 
@@ -1363,7 +1361,7 @@ def strip_leading_chain(text: str, chain: List[str]) -> str:
 def render_crumb(chain: List[str]) -> str:
     """面包屑标题链：文章 › 章 › 节（标题链是模型生成的结构化位置，核验核心抓手）。
     段落本身无章节层级（链上只有文章名）时不显示——材料卡标题已是文章名，
-    单独一行重复文章名对定位无增量（对齐公文写作 3.7.2，2026-09-19 反馈）。"""
+    单独一行重复文章名对定位无增量（2026-09-19 反馈）。"""
     parts = [esc(level) for level in chain if level]
     if len(parts) < 2:
         return ""
@@ -1403,7 +1401,7 @@ def render_source_card(source: Dict[str, str], for_print: bool = False) -> str:
     # 关键性行：有文号（接口 policyFiles 匹配）时"文号 · 数据源 · 日期"，否则"数据源 · 日期"。
     # 文号必须是标准格式——政府公文"〔年份〕序号"（杭政函〔2022〕81号）、公告/令类"第X号"
     # （财政部税务总局公告2023年第19号、主席令第三十五号、国务院令第765号，含汉字数字）；
-    # 描述性文字（"XX印发"类自造描述）不显示，当无文号处理（对齐公文写作 3.7.3/3.7.4）。
+    # 描述性文字（"XX印发"类自造描述）不显示，当无文号处理。
     _dn = source.get("doc_number") or ""
     _dn = _dn if re.search(r"〔\d{4}〕\s*\d+\s*号|第\s*(?:\d+|[〇零一二三四五六七八九十百千]+)\s*号", _dn) else ""
     meta_parts = [v for v in [_dn, source.get("agency"), source.get("date"), source.get("area")]
@@ -1541,7 +1539,7 @@ def render_toc(sections: List[Dict[str, Any]], extra: str = "") -> str:
     """章节目录（滚动 spy）：长报告（≥6 个**有标题**的章节）显示，桌面端左侧浮动。
 
     无标题节（正文开头的导语段）跳过——此前兜底成「第 N 节」占位项，且该锚点
-    #sec-i 在 render_section_cards 里根本不生成（死链接），点它没反应（对齐公文 3.7.6）。
+    #sec-i 在 render_section_cards 里根本不生成（死链接），点它没反应。
     extra 为附加条目 HTML（图表独立呈现时）；门槛按有标题章节数计。
     """
     items = []
@@ -1891,7 +1889,7 @@ a.jb-quote{text-decoration:none}
 .toc a{color:var(--muted);text-decoration:none;padding:4px 10px;border-left:2px solid var(--line);
   line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .toc a.on{color:var(--brand);border-left-color:var(--brand);font-weight:700}
-/* 知识专库视图下隐藏章节目录（2026-09-29，对齐公文 3.7.6）：.toc 渲染在 .app 之外，
+/* 知识专库视图下隐藏章节目录（2026-09-29 起）：.toc 渲染在 .app 之外，
    视图切换只由 .app[data-view] 驱动，此前无任何规则处理 .toc，专库视图下目录仍挂在左侧 */
 .app[data-view="library"] ~ .toc,.app[data-view="library"] .toc{display:none}
 @media (max-width:1460px){.toc{display:none}}
@@ -2335,7 +2333,7 @@ PAGE_JS = """
     }
     window.addEventListener("scroll", spy, { passive: true });
 
-    /* 目录纵向定位（2026-09-29，对齐公文 3.7.6）：此前 CSS 写死 top:120px，目录顶部与页头
+    /* 目录纵向定位（2026-09-29 起）：此前 CSS 写死 top:120px，目录顶部与页头
        齐平、离正文很远。改为——直接跟随正文首节，只保留"不低于顶栏下方"的下限；首屏看不到
        目录属正常，向下滚动后自然吸附在顶栏下方。目录过长由 CSS max-height:60vh+overflow:auto
        内部滚动兜底。 */
@@ -2389,7 +2387,7 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
             jb_tables[key] = html
     doc_title, sections = group_sections(blocks)
     display_title = doc_title or title
-    # 原问题行（2026-10-08 对齐公文 3.7.8）：只显示 --question 显式传入的原始问题，
+    # 原问题行（2026-10-08 起）：只显示 --question 显式传入的原始问题，
     # 不用文档标题冒充（标题是答案的成稿名，不是用户原话）。未传则整行不渲染。
     hero_question = (
         f'<div class="hero-q"><span class="q-label">原问题</span>{esc(question_override.strip())}</div>'
@@ -2575,7 +2573,7 @@ def renumber_citations(answer: str, sources: List[Dict[str, str]]) -> Tuple[str,
 def align_sources_to_answer(answer: str, sources: List[Dict[str, str]]) -> List[Dict[str, str]]:
     """不再按位置给材料重编号。
 
-    对齐公文写作 3.7.4 修复：原实现会在"正文角标与素材 id 完全不相交"时按顺序把素材改号
+    修复历史实现缺陷：原实现会在"正文角标与素材 id 完全不相交"时按顺序把素材改号
     迎合角标——正文写 [7] 而只有 1 篇来源文章时，会被洗成"✓ 引用对应 1/1"，与
     "未绑定角标绝不按位置猜测"的核验诚实性原则相反。现如实返回原素材，由核验单报未绑定。
     角标 1..N 的连续重排由 renumber_citations 独立完成（按首现顺序，1.1.5 用户要求）。
@@ -2604,7 +2602,7 @@ def resolve_charts_data(value: str) -> Optional[Dict[str, Any]]:
 
 
 def _next_version_path(path: Path) -> Path:
-    """输出文件已存在时不覆盖（1.4.0，用户决策）：自动改为 原名_v2 / _v3 … 另存。
+    """输出文件已存在时不覆盖（1.4.0 起）：自动改为 原名_v2 / _v3 … 另存。
 
     追加图表/修改答案后重跑渲染时，旧版本保留、新版本号递增——不覆盖已交付内容，
     也不会再靠宿主目录里的 "名字 (2)" 兜底。命名与 deliver_outputs.py 的重名规则一致。
@@ -2614,7 +2612,7 @@ def _next_version_path(path: Path) -> Path:
     for index in range(2, 100):
         candidate = path.with_name(f"{path.stem}_v{index}{path.suffix}")
         if not candidate.exists():
-            print(f"提示：{path.name} 已存在，本次输出改为 {candidate.name}（不覆盖旧版，用户决策 1.4.0）。")
+            print(f"提示：{path.name} 已存在，本次输出改为 {candidate.name}（不覆盖旧版，1.4.0 起）。")
             return candidate
     raise SystemExit(f"错误：{path.name} 的版本号 _v2~_v99 均已占用，请清理 {path.parent} 后重试。")
 

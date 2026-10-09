@@ -2,7 +2,7 @@
 """把 MCP「深知可信工作台」trusted_search（include_details=true 形态）的返回
 转换成深知可信搜索 REST 接口的原始响应形态，供本 Skill 全部下游流程复用。
 
-背景（对齐公文写作 3.7.3，搜索版 1.3.4）：检测到宿主已连接 MCP「深知可信工作台」时，搜索走 MCP 通道
+背景（搜索版 1.3.4 起）：检测到宿主已连接 MCP「深知可信工作台」时，搜索走 MCP 通道
 （免 API Key）。模型在对话层调用 MCP 工具后，把完整返回 JSON 保存到
 official-docs/search-results/，再运行本脚本转换——转换产物与 trusted_search.py
 直调 REST 的输出同构（content.data.检索文章 / policyFiles / knowledgeBase /

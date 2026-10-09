@@ -20,7 +20,7 @@ WorkBuddy.app），环境变量与当前目录作为兜底；识别不出时返�
   4. 豆包宿主：~/DoubaoWork/chats/<日期>/<会话> 中最近活跃的会话目录
   5. 宿主未知：当前目录（仅当当前目录不在 skill 目录树内）
   6. 都探测不到（宿主未知且 cwd 在 skill 树内）：不复制，交付物保留在 skill 输出目录
-     （3.7.5 简化决策：仅 WorkBuddy/豆包有明确工作区才复制，其余宿主不做猜测）
+     （仅 WorkBuddy/豆包有明确工作区才复制，其余宿主不做猜测）
 
 注意一：宿主 agent 执行 skill 脚本时当前目录常在 skill 安装目录内，因此不能用
 "当前目录是否等于 skill 目录"判断宿主环境。
@@ -355,7 +355,7 @@ def detect_dest(explicit_dest: str | None, host: str) -> tuple[Path | None, bool
         return dest, True, "cwd", False, []
 
     # 宿主身份未知：不复制、不要求 --dest，交付物保留在 skill 输出目录
-    # （3.7.5 简化决策：仅 WorkBuddy/豆包有明确工作区才复制，其余宿主留在 skill output）
+    # （仅 WorkBuddy/豆包有明确工作区才复制，其余宿主留在 skill output）
     if host == "unknown":
         return None, False, "unknown", False, doubao_candidates
 
@@ -487,7 +487,7 @@ def main() -> int:
                 "请用 --dest <本次任务的工作区目录> 重新运行本脚本。")
     elif dest_source == "unknown":
         # 宿主未知（非 WorkBuddy、非豆包）：交付物保留在 skill 输出目录，不复制
-        # （3.7.5 简化决策：不做宿主猜测，用户可自行从 skill output 取文件）
+        # （不做宿主猜测，用户可自行从 skill output 取文件）
         note = (f"未识别宿主环境（非 WorkBuddy / 豆包），交付物保留在 skill 输出目录 {OUTPUT_DIR}，"
                 "不复制到其他位置。")
     elif not files:
