@@ -7,7 +7,7 @@ description: "当用户需要可信搜索、权威材料检索、政策法规/�
 description_zh: "深知可信搜索（法律、政策、标准）是由北京彩智科技有限公司旗下“深知可信智能”提供的可信搜索与权威材料检索 Skill，面向政策法规、政务办事依据、税务社保、公积金、企业补贴、资质证照、行业标准、公共服务、合规义务、政策调研、城市政策对比和企业投资/技改/税惠材料核验等工作场景。检索按问题复杂度分级：单对象/单地域的枚举与单点事实用可信搜索，≥2 个对象/地域需对比并列或跨地域跨层级聚合、或用户明确表达深度意图时才用深度搜索，用户明确要求时总是调用深度搜索；输出带权威来源、知识专库、可点击溯源的单文件 HTML 产出物。"
 description_en: "dknowc trusted search is a trusted search and authoritative-source retrieval Skill provided by dknowc Trusted Intelligence under Beijing Caizhi Technology Co., Ltd. It supports policy, regulation, government-service evidence, standards, compliance, subsidy, tax-benefit and policy research tasks. Retrieval is tiered by question complexity: single-object or single-region questions (including enumerations such as “what policies exist”) use trusted search, while deep search is used only for two or more objects/regions being compared or aggregated across regions and levels, or on explicit user request. Delivers a direct answer and a single-file HTML deliverable with three switchable pages (body without markers, provenance verification report, knowledge library), with Markdown and PDF export."
 category: "office-efficiency"
-version: "1.5.1"
+version: "1.5.2"
 author: 彩智科技
 permissions:
   network:
@@ -259,9 +259,8 @@ skills.sh Public 版 API Key 统一且只通过 `DKNOWC_API_KEY` 提供；读取
 
 - 接口地址：默认 `https://open.dknowc.cn/dependable/search`；可通过 `--endpoint`、`DKNOWC_TRUSTED_SEARCH_ENDPOINT` 或 `DKNOWC_KNOW_SEARCH_ENDPOINT` 覆盖。
 - API Key：优先环境变量 `DKNOWC_API_KEY`，缺失时脚本自动兜底读 `~/.config/dknowc/api_key` 与历史 `~/.zshrc`。
-- `policy`：默认 `true`。
-- `item`：默认 `true`。
-- `know_base`：默认 `true`，用于返回（已移除：知识专库外链属老能力，2026-09-29）。
+- `policy`：默认 `true`（policyFiles 规范性文件清单是文号匹配的唯一来源）。
+- `item` / `know_base`：**不传**（2026-10-20 起）：办事清单 `recommendationItems` 接口侧始终不返回、知识专库外链属已移除老能力，全链路无消费者。
 - `return_full_content`：默认 `false`。
 - `segment_count`：默认 `2`。
 - `simplified`：默认 `false`（返回完整材料集并携带存档快照 `screenShotPath`）；`--simplified` 开启精炼输出（材料更少且**丢失快照字段**，需要生成核验报告时不要使用）。
@@ -273,6 +272,7 @@ skills.sh Public 版 API Key 统一且只通过 `DKNOWC_API_KEY` 提供；读取
 - API Key：优先环境变量 `DKNOWC_API_KEY`，缺失时脚本自动兜底读 `~/.config/dknowc/api_key` 与历史 `~/.zshrc`。
 - `area`：默认留空；单地域聚焦优先，明确多地域对比时可用逗号分隔一次传入。
 - `query_id`：默认不传；返回侧以 `traceId` 做链路追踪。接口偶发 `code=500 转发失败`（服务端问题），提示用户稍后重试或调整问题表述。
+- `timeout`：默认 `600` 秒（2026-10-20 起，与链路 10 分钟上限对齐；实测单地域 63–101 秒、重题可达 3–10 分钟）。
 
 ## 检索接口报错处理
 

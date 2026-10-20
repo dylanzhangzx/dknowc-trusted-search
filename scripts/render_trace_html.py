@@ -799,8 +799,11 @@ def compute_process_stats(sources: List[Dict[str, str]], answer: str) -> Dict[st
             "channel": channel,
         })
     n_searches = len(cond_rows) or (1 if sources else 0)
+    # 深度/可信互斥计数（2026-10-16 修复）：多数通道为拼接值（"深知深度搜索、深知可信搜索"）
+    # 的组同时含两个关键词，若不互斥会被两边各计一次——WB 实测"补搜 10 次"被虚报成 13 次，
+    # 与过程条明细行（if/else 口径）自相矛盾。此处与明细行同口径：含"深度"优先归深度。
     deep_routes = sum(1 for r in cond_rows if "深度" in r.get("channel", ""))
-    trusted_routes = sum(1 for r in cond_rows if "可信" in r.get("channel", ""))
+    trusted_routes = sum(1 for r in cond_rows if "可信" in r.get("channel", "") and "深度" not in r.get("channel", ""))
     used_count = sum(1 for s in sources if s.get("used", True))
     unused_count = len(sources) - used_count
     n_cite_marks = len(re.findall(r"\[(\d+)\]", answer))

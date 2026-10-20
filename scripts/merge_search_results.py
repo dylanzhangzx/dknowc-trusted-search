@@ -111,8 +111,18 @@ def _merge_article(target: Dict[str, Any], incoming: Dict[str, Any]) -> None:
     for ch_key in ("检索通道", "channel"):
         cur_ch = str(target.get(ch_key) or "").strip()
         inc_ch = str(incoming.get(ch_key) or "").strip()
-        if inc_ch and inc_ch not in cur_ch:
-            target[ch_key] = cur_ch + ("、" + inc_ch if cur_ch else inc_ch)
+        # 按 token（顿号分隔）去重后拼接（2026-10-16 修复）：原用子串判断，
+        # "深知可信搜索" 遇 "深知深度搜索、深知可信搜索" 时整串不是子串，会把已含的
+        # token 再拼一次，产生 "深知深度搜索、深知深度搜索、深知可信搜索" 这类重复值。
+        if inc_ch:
+            toks = [t.strip() for t in cur_ch.split("、") if t.strip()]
+            for t in inc_ch.split("、"):
+                t = t.strip()
+                if t and t not in toks:
+                    toks.append(t)
+            merged_ch = "、".join(toks)
+            if merged_ch != cur_ch:
+                target[ch_key] = merged_ch
     # 搜索条件（分组标签）：**不拼接**，保留首路标签作为分组归属。
     # 旧实现把两路标签拼成 "上海市落户政策、上海：人才引进申办条件" 这类组合标签，
     # 会把 7 路撑成 10 个分组，过程回顾条的"检索 N 次"随之虚高，材料专库也出现怪分组
@@ -282,8 +292,17 @@ def main() -> None:
                         continue
                     if not keep.get(f) and v:
                         keep[f] = v
-                if (drop.get("检索通道") or "") and drop["检索通道"] not in (keep.get("检索通道") or ""):
-                    keep["检索通道"] = (keep.get("检索通道") or "") + (("、" + drop["检索通道"]) if keep.get("检索通道") else drop["检索通道"])
+                # 通道拼接同款 token 去重（2026-10-16，与字段并集处同口径）
+                _inc = (drop.get("检索通道") or "").strip()
+                if _inc:
+                    _toks = [t.strip() for t in (keep.get("检索通道") or "").split("、") if t.strip()]
+                    for _t in _inc.split("、"):
+                        _t = _t.strip()
+                        if _t and _t not in _toks:
+                            _toks.append(_t)
+                    _merged = "、".join(_toks)
+                    if _merged != (keep.get("检索通道") or ""):
+                        keep["检索通道"] = _merged
                 merged.pop(drop_idx)
                 _fps.pop(drop_idx)
                 _near_dup += 1
