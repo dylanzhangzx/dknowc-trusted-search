@@ -55,6 +55,10 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = SKILL_ROOT / "official-docs" / "output"
 RECENT_WINDOW_SECONDS = 10 * 60
+# 只交付面向用户的最终产物：本 skill 唯一交付物是溯源核验报告 HTML；
+# output/ 里的正文 Markdown/TXT（render 的 --answer-file 中间文件）不交付、不复制
+# （对齐公文写作 3.9.2 交付硬闸门；规则早有——SKILL.md"交付物只有这一份 HTML"——此处代码兜底）
+ALLOWED_DELIVERY_SUFFIXES = (".html", ".htm")
 
 # 常见宿主工作区环境变量，按顺序探测
 WORKSPACE_ENV_VARS = (
@@ -431,12 +435,14 @@ def collect_files(args_files: list[str]) -> list[Path]:
                 p = (SKILL_ROOT / p).resolve() if (SKILL_ROOT / p).is_file() else p.resolve()
             files.append(p)
         return files
-    # 未指定文件：取 output 目录最近窗口内新建的文件
+    # 未指定文件：取 output 目录最近窗口内新建的文件（按交付后缀白名单过滤，
+    # 防止 output/ 里的正文 .md/.txt 中间文件被自动当作交付物）
     now = time.time()
     files = []
     if OUTPUT_DIR.is_dir():
         for p in sorted(OUTPUT_DIR.iterdir()):
-            if p.is_file() and (now - p.stat().st_mtime) < RECENT_WINDOW_SECONDS:
+            if (p.is_file() and (now - p.stat().st_mtime) < RECENT_WINDOW_SECONDS
+                    and p.suffix.lower() in ALLOWED_DELIVERY_SUFFIXES):
                 files.append(p)
     return files
 
@@ -516,6 +522,25 @@ def main() -> int:
         for src in files:
             if not src.is_file():
                 results.append({"copied": False, "source": str(src), "error": "文件不存在"})
+                continue
+            # 交付硬闸门（对齐公文写作 3.9.2）：非 HTML 一律拒绝——正文 Markdown/TXT
+            # 是装配 HTML 的中间文件，不得作为交付物展示或复制
+            if src.suffix.lower() not in ALLOWED_DELIVERY_SUFFIXES:
+                results.append({
+                    "copied": False, "source": str(src),
+                    "error": ("内部中间文件不交付：只允许 .html / .htm。"
+                              "正文 Markdown/TXT 仅用于装配溯源核验报告 HTML，"
+                              "不得作为交付物展示或复制（导出 Markdown/PDF 由用户在 HTML 顶栏自助操作）。"),
+                })
+                continue
+            try:
+                src.resolve().relative_to(OUTPUT_DIR.resolve())
+            except ValueError:
+                results.append({
+                    "copied": False, "source": str(src),
+                    "error": (f"交付源文件必须位于 {OUTPUT_DIR}/。"
+                              "不得从宿主会话目录或 skill 其它目录直接交付。"),
+                })
                 continue
             results.append(copy_without_overwrite(src, dest))
         # note 按实际结果生成：交付失败时不得再写"已复制到宿主工作区"

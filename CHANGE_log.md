@@ -1,10 +1,8 @@
 # 更新日志
 
-## 1.6.0-skills-sh - 2026-10-23
+## 1.6.0-skills-sh 同号修正 - 2026-10-26
 
-- 同步 SkillHub 主干 `1.6.0`（V2 可信搜索客户端、要件式改写、过程可信度、渲染安全加固、`--question-file`、联网检索降级链、文号键链修复）。
-- **`name` 由「深知可信搜索（法律、政策、标准）」改为 `dknowc-trusted-search`**：skills.sh CLI 用 frontmatter `name` 生成安装目录与 skill slug，中文名清洗后为空会回落成 `unnamed-skill` 且无法生成 `/命令`；中文名保留在 `display_name`/`display_name_en` 与标题行。slug 仍为 `dknowc-trusted-search-skills-sh`，来源声明 channel 为 `skills-sh`。
-- README 增加「安装」一节（`npx -y skills add dylanzhangzx/dknowc-trusted-search -g --all`）。
+- 补同步主干 2026-10-26 四次打包：`deliver_outputs.py` 交付硬闸门（显式交付仅允许 `.html`/`.htm`、交付源必须位于 `official-docs/output/`、自动收集按白名单过滤）。
 
 ## [1.6.0] - 2026-10-23（V2 可信搜索客户端 + 过程可信度 + 检索要件式改写）
 
@@ -22,6 +20,8 @@
 范围：仅 skillhub 主源升级；7 常规渠道与湾擎项目版仍为 1.5.2（渠道同步待下发）。
 
 > 同号修正（2026-10-23 三次打包，与公文写作 3.9.1 同日对齐）：文号键链修复——实测 V2 可信路文章级文号键名为「发文字号」（policy 路返回，如 `商办消费函〔2021〕58号`），`merge_search_results.py` 原键链（文号/doc_number）不含它，**1.6.0 切 V2 起文章级文号一直在 merge 被丢**、全靠 policyFiles 本地匹配兜底（writtenText 偶发为空，兜底不稳）；深搜接口同日上线文章级 `writtenText`（北京新能源政策题实测 43 篇带 10 篇约 1/4 覆盖，样例 `京环发〔2024〕8号`；纯深搜响应无 policyFiles，该字段是纯深搜文号唯一来源）。修法：键链扩为 `文号 > 发文字号 > doc_number > writtenText`（中文键优先、缺键行为不变）。E2E：V2 单路 merge 文号存活；深搜 writtenText 经 deep_convert 透传→merge 入链→渲染材料卡关键行「京环发〔2024〕8号 · 2024年05月10日」。SKILL.md 三处口径同步（163/283/287：深搜不再"完全不带文号"、policyFiles 从"唯一来源"改为兜底、政策依据型"无文号时仍补搜"）。
+
+> 同号修正（2026-10-26 四次打包，吸收公文写作 3.9.2 交付硬闸门）：`deliver_outputs.py` 新增交付白名单与源目录校验——显式传入文件仅允许 `.html`/`.htm`（正文 Markdown/TXT 是装配 HTML 的中间文件，拒绝交付，导出由用户在 HTML 顶栏自助操作）；交付源必须位于 `official-docs/output/`（不得从宿主会话目录或 skill 其它目录直接交付）；未显式指定文件时的自动收集同样按白名单过滤（render 的 `--answer-file` 会把正文中间文件写进 output/，不过滤时"唯一近期文件"可能是 .md 而被自动交付）。SKILL.md"交付物只有这一份 HTML"规则此前仅靠模型自觉，此处代码兜底；单测四例通过（.md 拒绝／目录外拒绝／合法 HTML 复制／自动收集过滤）。
 
 ## [1.5.2] - 2026-10-20（MaaS 接口盘点对账：检索参数瘦身 + 深搜超时对齐）
 
