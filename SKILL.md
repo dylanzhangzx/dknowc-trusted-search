@@ -7,7 +7,7 @@ description: "当用户需要可信搜索、权威材料检索、政策法规/�
 description_zh: "深知可信搜索（法律、政策、标准）是由北京彩智科技有限公司旗下“深知可信智能”提供的可信搜索与权威材料检索 Skill，面向政策法规、政务办事依据、税务社保、公积金、企业补贴、资质证照、行业标准、公共服务、合规义务、政策调研、城市政策对比和企业投资/技改/税惠材料核验等工作场景。检索按问题复杂度分级：单对象/单地域的枚举与单点事实用可信搜索，≥2 个对象/地域需对比并列或跨地域跨层级聚合、或用户明确表达深度意图时才用深度搜索，用户明确要求时总是调用深度搜索；输出带权威来源、知识专库、可点击溯源的单文件 HTML 产出物。"
 description_en: "dknowc trusted search is a trusted search and authoritative-source retrieval Skill provided by dknowc Trusted Intelligence under Beijing Caizhi Technology Co., Ltd. It supports policy, regulation, government-service evidence, standards, compliance, subsidy, tax-benefit and policy research tasks. Retrieval is tiered by question complexity: single-object or single-region questions (including enumerations such as “what policies exist”) use trusted search, while deep search is used only for two or more objects/regions being compared or aggregated across regions and levels, or on explicit user request. Delivers a direct answer and a single-file HTML deliverable with three switchable pages (body without markers, provenance verification report, knowledge library), with Markdown and PDF export."
 category: "office-efficiency"
-version: "1.6.0"
+version: "1.6.1"
 author: 彩智科技
 permissions:
   network:
@@ -93,13 +93,31 @@ python3 scripts/initialize.py
   成功后转述脚本 `user_message`（固定话术见 `reference/onboarding_scripts.md` S0），再用已写入的 Key 重跑 `python3 scripts/initialize.py` 确认 `api_key_configured=true`，继续原任务。密钥不得在对话正文中展示。
 - **工具不存在，或调用返回"请先完成 MCP OAuth 授权"等错误**：视为该宿主未安装/未授权该 MCP，**直接回落到下面的手机号验证码注册流程**（流程不变），不向用户提及 MCP 内部细节、不反复重试取 Key。
 
-MaaS Key 获取按两步流程执行：
+MaaS Key 获取按三步流程执行（平台要求 Agent 先答一道文字题再发码，题目由 Agent 当场计算，**不把题目发给用户**）：
 
 ```bash
-node scripts/register_key.mjs send --phone <手机号>
+node scripts/register_key.mjs challenge --phone <手机号>
 ```
 
-send 退出码三态：**0=短信已直发**——原样转述输出中的 `user_message` 话术（含脱敏手机号，提醒用户发"最新一条"短信的验证码），暂停索取 6 位验证码，不得自行编造验证码；**2=需用户在验证页完成验证（`CAPTCHA_REQUIRED`，短信尚未发送）**——原样转述含验证链接的 `user_message` 后暂停，等用户回复短信验证码，**用户在页面完成验证后不得再调用 send**（链接一次性、约 10 分钟有效，过期或已用需用户同意后重新 send 申请新链接）；**1=错误**——同样原样转述 `user_message`（手机号格式错误不重发、发送失败重试上限 2 次后走网页开通；限频/链接失效/供应商失败/结果未确认按各自停点处理，见 onboarding_scripts.md 报错表）。用户只说"验证好了"但没发码时，只追问 6 位短信验证码，不再调 send。
+challenge 读取官方注册指引并领题，只调用一次、不自动重试。**平台回退自动兜底**：官方指引不可用时（文字题接口未上线，或平台临时回退到旧版发码接口），challenge 自动改走原短信直发分支——退出 0 即验证码已发送（`code:"SMS_SENT"`），此路径**不需要调用 answer**，直接等用户 6 位验证码；退出 2 为人工验证链接。输出字段 `flow`：`agent-text` 表示文字题流程，`legacy` 表示旧发码分支，两种对用户等价。
+
+- **退出 0**：JSON 带 `question.prompt` 与 `answerFormat`。按题意计算，用非负整数调用 answer；**题目、token、答题过程都不进入对话**。返回 `reused:true` 表示本机已有同号未过期题目，直接沿用。
+- **退出 2（`HUMAN_REQUIRED`）**：平台要求人工完成图片验证，原样转述 `user_message`（含校验通过的验证链接）后暂停，等号主完成验证并提供短信验证码；链接一次性、约 10 分钟有效，仅私下展示给手机号持有人，不得拼改、转发、贴群。
+- **退出 1（错误）**：按脚本 `user_message` 停点处理（限频 `SMS_RATE_LIMIT`、目标锁定 `AGENT_TEXT_TARGET_LOCKED`、服务不可用 `AGENT_TEXT_UNAVAILABLE`、号码被拒 `SMS_REQUEST_REJECTED`、结果未确认，各有专门话术，见 onboarding_scripts.md 报错表）；不循环重试、不换手机号、不换接口绕过。
+
+```bash
+node scripts/register_key.mjs answer --phone <手机号> --answer <非负整数>
+```
+
+answer 提交答案，答对即申请发码：
+
+- **退出 0（`SMS_SENT`）**：原样转述脚本 `user_message`（含脱敏手机号与"最新一条"提示），暂停索取 6 位验证码；不得重复调 answer。
+- **退出 3（`AGENT_TEXT_RETRY`）**：答错已换新题（JSON 带新 `question`），重新计算后再次调用 answer，含首次最多 3 次；**不得重置 attempt、不得重复领题刷机会**。
+- **退出 2（`HUMAN_REQUIRED`）**：转人工，按上一条链接话术处理。
+- **退出 4（`RESULT_UNKNOWN`）**：发送结果未确认（超时/断网）。先让用户看手机；**未确认前不得再次作答、不得重新领题**。
+- **退出 1（错误）**：按 `user_message` 停止本轮，不绕过。
+
+用户只说"验证好了"但没发码时，只追问 6 位短信验证码，不再调 challenge/answer。领题状态由脚本自行保存（`~/.config/dknowc/maas_agent_challenge.json`，600 权限），challenge 与 answer 之间不需要也不允许手工传 token；同一手机号存在未过期题目时复用，不重复领题。**验证红线**：题目内容、挑战 token 与领题会话不进入对话正文与日志；不代用户打开验证页、不模拟或绕过任何验证、不伪造验证凭据。
 
 拿到验证码后执行：
 
@@ -107,7 +125,7 @@ send 退出码三态：**0=短信已直发**——原样转述输出中的 `user
 node scripts/register_key.mjs register --phone <手机号> --vcode <验证码> --organ 个人 --name 用户
 ```
 
-脚本默认固定 `type=11`（可信统一），自动使用 skills.sh 注册渠道码 `8C8D411C-6A46-4E99-887D-87D9A1329930`，并固定携带 `source="agent"`——它是注册 API 的合同标记，服务端按它放行"老用户直接返 Key"路径（传 skill 标识会返回"用户已存在！"导致老用户取不回 Key）；它与 `X-Dknowc-Attribution` 统计声明头里的 `agentSource`（值为 dknowc-trusted-search）是两个不同字段。获取验证码（sendMessage）与注册（register）两步的请求体均携带该渠道码，用于注册行为渠道细分统计。如果手机号已注册，MaaS 会在验证码校验通过后查回该账号已有可用 API Key；默认不主动新建 Key。register 返回 `pending=true`（账号已创建、密钥准备中）**不是错误**：不重新注册、不重新发码，等用户示意后用同一手机号与同一验证码重试一次（短信码 5 分钟有效）；返回"用户已存在！"时按话术据实说明并引导平台登录，不冒充找回成功。
+脚本默认固定 `type=11`（可信统一），自动使用 skills.sh 注册渠道码 `8C8D411C-6A46-4E99-887D-87D9A1329930`，并固定携带 `source="agent"`——它是注册 API 的合同标记，服务端按它放行"老用户直接返 Key"路径（传 skill 标识会返回"用户已存在！"导致老用户取不回 Key）；它与 `X-Dknowc-Attribution` 统计声明头里的 `agentSource`（值为 dknowc-trusted-search）是两个不同字段。获取验证码（challenge/answer 文字题路；平台回退时为旧版 sendMessage）与注册（register）的请求体均携带该渠道码，用于注册行为渠道细分统计。如果手机号已注册，MaaS 会在验证码校验通过后查回该账号已有可用 API Key；默认不主动新建 Key。register 返回 `pending=true`（账号已创建、密钥准备中）**不是错误**：不重新注册、不重新发码，等用户示意后用同一手机号与同一验证码重试一次（短信码 5 分钟有效）；返回"用户已存在！"时按话术据实说明并引导平台登录，不冒充找回成功。
 
 注册成功后：脚本自动把 Key 写入本机专用配置文件 `~/.config/dknowc/api_key`（纯文本一行、权限 0600；`--no-persist` 可跳过，跳过后可用 `persist` 命令手动补写），并清理历史 `~/.zshrc` Key 块；业务脚本与 initialize.py 直读该文件，**无需重启宿主**。**持久化成功时脚本仅返回 `apiKeyMasked` 与写入路径（不返回明文 apiKey）**——业务脚本从配置文件直读 Key，无需手动注入；仅写入失败才回退明文 apiKey 供临时注入。**必须原样转述输出中的 `user_message`**（开通成功/老用户找回话术，含积分到账确认）。不得向用户展示完整 API Key，不得要求用户手动复制 API Key。当前任务重新运行初始化检查确认通过后继续处理用户原任务。万一 `envWriteSucceeded=false`（写入配置文件失败），按 `envWriteInstruction` 处理并如实告知用户，不影响本次检索。
 

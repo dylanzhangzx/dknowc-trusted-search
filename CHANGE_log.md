@@ -1,5 +1,10 @@
 # 更新日志
 
+## 1.6.1-skills-sh - 2026-10-29
+
+- 同步 SkillHub 主干 `1.6.1`（注册链路改造，对齐公文写作 3.9.3 / MaaS 身份中心升级）：`register_key.mjs` 的 `send` 拆为 `challenge`＋`answer`（Agent 领文字题、当场计算、答对发码，题目与 token 不进对话），并带平台回退自动兜底（官方指引不可用时自动回落旧版短信直发/人工链接，`flow=agent-text|legacy`，平台恢复后自动切回）；退出码 0/2/3/4/1；状态落盘 `~/.config/dknowc/maas_agent_challenge.json`；验证链接改为同源＋`sms-verification-page` 后缀校验。
+- 同步 `initialize.py` guide 话术、`SKILL.md` 注册三步＋安全红线、`reference/onboarding_scripts.md`（S3-1 领题作答对用户不可见，重排 S3a–S3d，报错表补 AGENT_TEXT_RETRY / TARGET_LOCKED / UNAVAILABLE / CHALLENGE_EXPIRED）、README 注册说明。其余文件与 1.6.0 一致。
+
 ## 1.6.0-skills-sh 同号修正 - 2026-10-26
 
 - 补同步主干 2026-10-26 四次打包：`deliver_outputs.py` 交付硬闸门（显式交付仅允许 `.html`/`.htm`、交付源必须位于 `official-docs/output/`、自动收集按白名单过滤）。
