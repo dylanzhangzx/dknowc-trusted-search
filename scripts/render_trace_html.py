@@ -438,7 +438,7 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
     # 检索通道（深知深度搜索 / 深知可信搜索）：由检索脚本在产物上打标、merge 透传，
     # 供过程条/hero 按接口通道拆分计数；历史 JSON 无该字段时为空（渲染层回退旧文案）
     source["channel"] = first_str(item.get("检索通道"), item.get("channel"))
-    # 非官方来源（1.6.0，徐总 10-21 要求）：联网路（searchChannel=webSearch）召回的非权威站点材料。
+    # 非官方来源：联网路（searchChannel=webSearch）召回的非权威站点材料。
     # 双口径判定：联网路脚本打标 非官方来源=True；或接口 dataAuthority 返回 数据权威性=非权威。
     source["unofficial"] = bool(item.get("非官方来源")) or str(
         item.get("数据权威性") or item.get("authority") or "").strip() in ("非权威", "non-authoritative")

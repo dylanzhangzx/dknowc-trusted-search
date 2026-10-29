@@ -1,13 +1,56 @@
 # 更新日志
 
-## 1.6.1-skills-sh - 2026-10-29
+## 1.6.2-skills-sh - 2026-10-29
 
-- 同步 SkillHub 主干 `1.6.1`（注册链路改造，对齐公文写作 3.9.3 / MaaS 身份中心升级）：`register_key.mjs` 的 `send` 拆为 `challenge`＋`answer`（Agent 领文字题、当场计算、答对发码，题目与 token 不进对话），并带平台回退自动兜底（官方指引不可用时自动回落旧版短信直发/人工链接，`flow=agent-text|legacy`，平台恢复后自动切回）；退出码 0/2/3/4/1；状态落盘 `~/.config/dknowc/maas_agent_challenge.json`；验证链接改为同源＋`sms-verification-page` 后缀校验。
-- 同步 `initialize.py` guide 话术、`SKILL.md` 注册三步＋安全红线、`reference/onboarding_scripts.md`（S3-1 领题作答对用户不可见，重排 S3a–S3d，报错表补 AGENT_TEXT_RETRY / TARGET_LOCKED / UNAVAILABLE / CHALLENGE_EXPIRED）、README 注册说明。其余文件与 1.6.0 一致。
+- 同步 SkillHub 母版 `1.6.2`（终审通过版）：注册链路 `challenge`＋`answer`＋平台回退兜底；**全包不读取、不写入、不改写任何 shell 配置文件**（`~/.zshrc` 读写代码全部移除），Key 来源收敛为「环境变量 `DKNOWC_API_KEY` → `~/.config/dknowc/api_key`」；`scripts/mcp_convert.py` 移出随包（打包白名单 18→17）；对外包卫生整改（无内部人名/内部版本史/实验数据、无具体手机号示例、无仓库内文档悬空引用）；`trusted_search.py`/`deep_query.py`/`render_trace_html.py` 注释中性化（无功能变化）。
+- 使用skills.sh注册渠道码 `8C8D411C-6A46-4E99-887D-87D9A1329930`，`type=11`，slug 为 `dknowc-trusted-search-skills-sh`，来源声明 channel 为 `skills-sh`；渠道差异仅 SKILL.md 渠道名/slug/渠道码、README 渠道名、attribution.json channel、register_key.mjs DEFAULT_CHANNEL 四项。
 
-## 1.6.0-skills-sh 同号修正 - 2026-10-26
+### 三审整改（同日，版本号仍 1.6.2）
 
-- 补同步主干 2026-10-26 四次打包：`deliver_outputs.py` 交付硬闸门（显式交付仅允许 `.html`/`.htm`、交付源必须位于 `official-docs/output/`、自动收集按白名单过滤）。
+依据「skill审核」2026-10-29《深知可信搜索-1.6.2-三审报告》（驳回，仅剩「文档未跟上代码」）与 Dylan 对「需确认」项的裁决（移除）：
+
+1. **文档与实现对齐（阻塞）**：SKILL.md 两处（读取兜底段、Key 段）与 initialize.py docstring 中「会清理 zshrc」的旧表述全部修正为「脚本不写入、不改写、不清理任何 shell 配置文件」；README 口径同步。
+2. **移除 ~/.zshrc 只读兜底（Dylan 决定）**：`api_key.py` 删除 `_read_legacy_zshrc()` 与 zshrc 读取分支，Key 来源收敛为「进程环境变量 → 本机专用配置文件」；`api_key_source` 取值收敛为 `environment` / `keyfile`；SKILL.md / README / initialize.py / deep_query.py / trusted_search.py 的读取顺序与注释同步。仅 zshrc 有 Key 的旧安装重开时会提示未配置，走开通流程可自动找回已有 Key。
+3. 验证：py_compile / node --check / check_release / 注册链路 mock 18/18 通过；key 解析单测（zshrc 存在但不读取、env 与配置文件正常）。
+
+### 二次复审整改（同日，版本号仍 1.6.2）
+
+依据「skill审核」2026-10-29《深知可信搜索-1.6.2-复审报告》（复审结论：驳回，仅剩 1 个阻塞）与 Dylan 当日决定（zshrc 写入按问题处理、版本号保持 1.6.2 不升）：
+
+1. **阻塞项修复**：`reference/onboarding_scripts.md` 中 S3a / S3b / S4 三条话术模板写死的 `185****1711` 全部替换为 `<脱敏手机号>` 占位，并明确要求运行时用脚本 `user_message` 返回的实际号码填充，模板不得使用任何固定示例号码。
+2. **门禁补强**：`check_release.py` 新增手机号双口径扫描——完整 11 位手机号与脱敏形式 `1xx****xxxx` 均拦截（对外包模板一律用 `<脱敏手机号>` 占位）。
+3. **zshrc 写入彻底移除**：`register_key.mjs` 删除 `removeLegacyZshrcBlocks()` 及全部 `~/.zshrc` 写入代码（连同 `--clean-zshrc` 门控与相关常量/工具函数一并移除）——脚本不再读取、写入、改写用户 `~/.zshrc`（历史版本遗留的 Key 标记块由用户自行处理；读取顺序中 zshrc 仅作只读兜底）。
+4. **复审建议项（内部版本史残留）**：脚本注释与部分文档仍含 1.3.5 / 1.4.0 / 1.6.0 与「实测」字样等维护溯源注释（建议级、不阻塞）；本版未逐条清理，如审核要求可下轮统一处理。
+- 版本：保持 1.6.2（zip 文件名 + SKILL.md version 均不升）；包 17 文件；渠道码与 attribution channel 未动。
+- 验证：py_compile / node --check / check_release（含新增手机号门禁）/ 注册链路 mock 18/18 / 包内合规扫描全过。
+
+## [1.6.2] - 2026-10-29（母版发布前审核整改）
+
+依据「skill审核」2026-10-29《深知可信搜索-1.6.1-母版问题清单》逐条整改（范围：skillhub 母版；渠道本轮不审）。逐条结论：S1–S5 均为「是问题」，Q1 按「保留规则、剥离内部实验数据」处理；清单中判为不适用/非问题的四项（路径穿越、mcp_convert 凭证风险、任意手机号发码+Math.random、文字题代答）维持不动。
+
+1. **S1 ~/.zshrc 改写（阻塞）**：`register_key.mjs` 不再默认清理历史 zshrc 标记块——清理改为 `--clean-zshrc` 显式开启（SKILL.md 同步要求先征得用户同意），改写时**保留原文件权限位**（不再强制 `0o600` 整体重写）；`save-key` / `persist` 同受该约束。单测：未传旗标 zshrc 逐字节不变；传旗标仅删除自有标记块、644 权限保留、其他行不丢。（注：1.6.1 移植公文 3.9.3 时该行为相对 1.6.0 出现回退，本次恢复并加严。）
+2. **S2 注册话术（阻塞）**：SKILL.md 与 `onboarding_scripts.md` S1/S2 改为如实说明「会为用户注册检索账号、短信是注册验证码」（平台 2026-10-29 Agent 注册要求），不再回避「注册」一词；仍不暴露 MaaS/API Key 等内部术语。
+3. **S3 内部人名（阻塞）**：SKILL.md 2 处、`trusted_search.py` / `render_trace_html.py` 注释各 1 处「徐总」及个人日期口径全部移除，改中性表述；包内文件人名扫描为 0。
+4. **S4 MCP 内部事故叙述 + 死文件（阻塞）**：SKILL.md MCP 段删除内部失败率与恢复路线图，改为中性说明；`scripts/mcp_convert.py`（规则层不引用的死文件）移出源码与包（包文件 18→17），README 检查命令同步。
+5. **S5 悬空引用（阻塞）**：SKILL.md 删除对仓库内产品文档的引用（文件不在包内、名称含内部分发口径），改为「版本定稿后同步维护对外产品文档」。
+6. **Q1 内部版本史与实测数据（确认项）**：SKILL.md 全量清理「实测 / 1.3.x / 1.4.x / 1.6.0」标注与实验数字（如 0/7、7/7、1/4、83%），保留为可执行规则表述；平台契约类事实（接口参数、状态码、平台改名）保留。
+
+- 版本：1.6.2（仅同步 zip 文件名与 SKILL.md version；attribution.json 无 version 字段）；渠道码 `DEFAULT_CHANNEL` 与 attribution.json `channel` 保持原值。
+- 验证：node --check / py_compile / check_release 通过；zshrc 行为单测通过；包 17 文件无 __pycache__/.DS_Store。
+
+## [1.6.1] - 2026-10-29（注册链路改为 Agent 文字题 + 人工兜底）
+
+随公文写作 3.9.3 同步对齐 MaaS 身份中心升级：
+
+- **平台变更导致的断链**：2026-10-28 晚 MaaS 身份中心升级后，旧 `POST /auth/home/userAuto/sendMessage` 对 Agent 一律要求图片验证，注册链路第一跳即中断。
+- **脚本改造**（`register_key.mjs`，`send` 拆为 `challenge` + `answer`）：`challenge` 读取官方 Agent 注册指引（相对地址按指引最终响应 URL 解析，保留 `/maas/identity-center/maas/login/` 代理前缀），在同一 `sl-session` 会话内领取文字题并落盘（`~/.config/dknowc/maas_agent_challenge.json`，600 权限）；`answer` 提交非负整数答案，答对即申请发码；`register`、`save-key`、`persist` 不变；`send` 已移除。
+- **平台回退兜底**：平台当日上午回退（指引接口 404、旧 `sendMessage` 恢复），`challenge` 先探测官方指引，不可用时自动回落旧版短信直发分支（退出 0 直接为已发码、退出 2 为人工链接），输出 `flow` 标明 `agent-text` / `legacy`；平台恢复后自动切回文字题流程，无需再升版本。错误输出补 `detail` 字段（仅错误原因，不含凭据），避免把 404 误报为「网络波动」。
+- **分支处理**：`AGENT_TEXT_RETRY` 用 `nextChallenge` 换题（含首次最多 3 次，不重置 attempt，不重复领题刷机会）；`AGENT_TEXT_FAILED` / `fallbackRequired` 转人工，把校验通过的 `verificationUrl` 私下交给手机号持有人；`SMS_RATE_LIMIT` / `AGENT_TEXT_TARGET_LOCKED` / `AGENT_TEXT_UNAVAILABLE` / `SMS_REQUEST_REJECTED` 为终止停点；超时断网标记结果未知、不自动重发；同一手机号在题目未过期时复用，不重复请求。
+- **安全校验**：验证页链接从「精确路径」放宽为「同源 + 路径以 `sms-verification-page` 结尾」，兼容代理前缀，仍拒绝 query、编码与非规范写法；题目 token、会话与验证链接不进入对话正文与日志。
+- **话术/文档**：`onboarding_scripts.md` 新增 S3-1（领题作答对用户完全不可见），重排 S3a/S3b/S3c/S3d 并按新错误码收敛报错表；S1「不用去网站」改为「不用自己填注册表」（人工兜底时口径属实），`initialize.py` guide_message 同步；SKILL.md 注册两步改三步并补安全红线（不把题目发给用户、token 与会话不进对话）；README 与产品文档同步。
+- **验证**：本地 mock 18 例通过（相对地址解析、会话保持、发码、复用、换题、人工接手、链接校验、限频、号码与答案格式、过期、无题/号码不匹配、用法提示）；线上实探官方指引当前返回 404（平台已回退），legacy 回退分支为当前生效路径。
+
+范围：skillhub 主源升级；渠道 1.6.0（2026-10-26 发布）待随升 1.6.1，湾擎项目版仍为 1.5.2。
 
 ## [1.6.0] - 2026-10-23（V2 可信搜索客户端 + 过程可信度 + 检索要件式改写）
 

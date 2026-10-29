@@ -47,15 +47,10 @@ const DEFAULT_GUIDE = "https://platform.dknowc.cn/maas/identity-center/maas/logi
 // 挑战状态（Cookie / token / attempt / 题目）落盘，供 challenge 与 answer 两次调用之间传递。
 // attempt 必须始终使用服务端返回值，刷新题目不增加机会，故本机只做保存、不改写。
 const CHALLENGE_STATE_FILE = "maas_agent_challenge.json";
-// Key 持久化目标：本机专用配置文件（XDG 规范路径），不再写 ~/.zshrc。
-// 3.7.5 迁移：写入新文件成功后，清理 ~/.zshrc 中的历史 Key 块。
+// Key 持久化目标：本机专用配置文件（XDG 规范路径）。
+// 本脚本不读取、不写入、不改写任何 shell 配置文件（2026-10-29 审核整改：彻底移除 shell 配置读写；
+// 历史版本可能残留的 Key 标记块由用户自行处理）。
 const KEY_FILE_NAME = "api_key";
-const ZSHRC_START = "# >>> dknowc trusted search api key >>>";
-const ZSHRC_END = "# <<< dknowc trusted search api key <<<";
-// 历史 ~/.zshrc 标记块（含旧名），迁移期统一清理
-const LEGACY_BLOCKS = [
-  [ZSHRC_START, ZSHRC_END],
-];
 
 // 配置目录：默认 ~/.config/dknowc（Windows 为 %APPDATA%\dknowc），可用 DKNOWC_CONFIG_DIR 覆盖。
 function configDir() {
@@ -73,20 +68,6 @@ function apiKeyFilePath() {
   return path.join(configDir(), KEY_FILE_NAME);
 }
 
-function removeLegacyZshrcBlocks() {
-  // 迁移：从 ~/.zshrc 移除历史 Key 标记块（避免污染 shell 配置）
-  const zshrcPath = path.join(os.homedir(), ".zshrc");
-  try {
-    let existing = fs.existsSync(zshrcPath) ? fs.readFileSync(zshrcPath, "utf8") : "";
-    if (!existing) return;
-    let changed = false;
-    for (const [start, end] of LEGACY_BLOCKS) {
-      const re = new RegExp(`${escapeRegExp(start)}[\\s\\S]*?${escapeRegExp(end)}\\n?`, "m");
-      if (re.test(existing)) { existing = existing.replace(re, ""); changed = true; }
-    }
-    if (changed) fs.writeFileSync(zshrcPath, existing, { encoding: "utf8", mode: 0o600 });
-  } catch (e) { /* 清理失败不阻断写入流程 */ }
-}
 
 function maskPhone(phone) {
   const p = String(phone || "");
@@ -340,21 +321,17 @@ async function createNewApiKey(openBase, existingApiKey, name, remark) {
 }
 
 function writeApiKeyToConfigFile(apiKey) {
-  // 写本机专用配置文件（纯文本一行 Key，600 权限）；成功后清理历史 ~/.zshrc 块
+  // 写本机专用配置文件（纯文本一行 Key，600 权限）；不触碰任何 shell 配置文件。
   const filePath = apiKeyFilePath();
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
     fs.writeFileSync(filePath, `${String(apiKey).trim()}\n`, { encoding: "utf8", mode: 0o600 });
-    removeLegacyZshrcBlocks();
     return { written: true, path: filePath, error: null };
   } catch (e) {
     return { written: false, path: filePath, error: e && e.message ? e.message : String(e) };
   }
 }
 
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 // —— Agent 注册：响应归类 ——
 // 平台返回 status:true 只代表"本步成功"：领题成功≠已发码，发码成功≠注册完成。
@@ -420,7 +397,7 @@ async function main() {
     // 成功（返回顶层 JSON {"apiKey": "..."}）后，用本命令落盘，用户无需手机号验证码。
     // 密钥来源优先 stdin（printf '%s' "<密钥>" | node register_key.mjs save-key，避免出现在
     // 命令行参数里），其次 --api-key；仅接受 sk- 开头。落盘复用 writeApiKeyToConfigFile
-    // （600 权限 + 清理历史 ~/.zshrc 块），与手机号注册路径同一份持久化逻辑。
+    // （600 权限，不触碰 shell 配置），与手机号注册路径同一份持久化逻辑。
     let apiKey = "";
     try {
       if (!process.stdin.isTTY) {
@@ -825,7 +802,7 @@ async function main() {
       }
     }
     // 注册成功自动持久化到本机专用配置文件 ~/.config/dknowc/api_key（1.3.5 起：
-    // 不再写 ~/.zshrc，避免污染 shell 配置；读取顺序 env→配置文件→历史 zshrc 兜底）。
+    // 不读写 shell 配置（读取顺序 env→配置文件）。
     // --no-persist 可跳过；persist 命令保留用于事后手动补持久化。
     const cfgWrite = ok && apiKeyToSave && !a["no-persist"]
       ? writeApiKeyToConfigFile(apiKeyToSave)

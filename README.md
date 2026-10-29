@@ -1,6 +1,6 @@
 # 深知可信搜索（法律、政策、标准）（skills.sh Public 版）
 
-这是深知可信搜索（法律、政策、标准）的 skills.sh Public 分发版本。功能逻辑与 full 版对齐，不再调用统一咨询接口；检索统一走本 Skill 脚本通道（1.3.5 起彻底回退 MCP 通道，MCP 大结果落盘方案效果有问题，待技术侧改造后恢复）。本版本不内置 API Key；优先从环境变量 `DKNOWC_API_KEY` 读取，宿主进程读不到 shell 环境变量时自动从本机专用配置文件 `~/.config/dknowc/api_key` 读取（历史 `~/.zshrc` Key 块迁移期兜底，避免 WorkBuddy 等宿主误报缺 Key）；未配置时 Agent 可先通过 MaaS 手机号验证码流程获取 Key（注册成功自动写入专用配置文件并清理旧 zshrc 块）。
+这是深知可信搜索（法律、政策、标准）的 skills.sh Public 分发版本。功能逻辑与 full 版对齐，不再调用统一咨询接口；检索统一走本 Skill 脚本通道（1.3.5 起彻底回退 MCP 通道，MCP 大结果落盘方案效果有问题，待技术侧改造后恢复）。本版本不内置 API Key；优先从环境变量 `DKNOWC_API_KEY` 读取，宿主进程读不到 shell 环境变量时自动从本机专用配置文件 `~/.config/dknowc/api_key` 读取（不读写任何 shell 配置文件，避免 WorkBuddy 等宿主误报缺 Key）；未配置时 Agent 可先通过 MaaS 手机号验证码流程获取 Key（注册成功自动写入专用配置文件）。
 
 ## 安装
 
@@ -28,15 +28,15 @@ npx -y skills add dylanzhangzx/dknowc-trusted-search -g --all
 python3 scripts/initialize.py
 ```
 
-只有返回 `ready=true`、`api_key_configured=true`、`api_key_source` 为 `environment`、`keyfile` 或 `zshrc` 后才继续处理原任务。初始化未通过时，只允许引导用户完成 MaaS Key 获取或环境变量配置，不得先输出答案、草稿、大纲、材料清单或分析结论。
+只有返回 `ready=true`、`api_key_configured=true`、`api_key_source` 为 `environment` 或 `keyfile` 后才继续处理原任务。初始化未通过时，只允许引导用户完成 MaaS Key 获取或环境变量配置，不得先输出答案、草稿、大纲、材料清单或分析结论。
 
 ## MaaS 注册与环境变量配置
 
-当前版本统一通过 `DKNOWC_API_KEY` 提供 Key（读取顺序：环境变量 → 本机专用配置文件 `~/.config/dknowc/api_key` → 历史 `~/.zshrc` 迁移期兜底），不扫描或复用其他深知系列 Skill 的本地 `config.ini`，业务调用脚本经 `api_key.py` 统一解析、不读取 `config.ini` 或传入 `szUserId`。如当前环境变量未配置：
+当前版本统一通过 `DKNOWC_API_KEY` 提供 Key（读取顺序：环境变量 → 本机专用配置文件 `~/.config/dknowc/api_key`；不读写任何 shell 配置文件），不扫描或复用其他深知系列 Skill 的本地 `config.ini`，业务调用脚本经 `api_key.py` 统一解析、不读取 `config.ini` 或传入 `szUserId`。如当前环境变量未配置：
 
 - 可运行 `scripts/register_key.mjs` 领题作答并注册/查回 Key（`challenge` → `answer` → `register`；平台回退时 challenge 自动走旧版短信直发分支，输出 `flow` 标明 `agent-text`/`legacy`；各分支输出 `user_message` 固定话术，Agent 必须原样转述；题目由 Agent 当场计算，不进入对话）；宿主提供「深知可信工作台」（dknowc-mcp）且用户已完成 OAuth 授权时，优先经其 `create_api_key` 工具直接取 Key 并用 `save-key` 子命令落盘，免去手机号验证码（随公文写作 3.7.7 移植）。
 - 所有向深知 MaaS 发请求的脚本（trusted_search / deep_query / register_key.mjs）统一携带 `X-Dknowc-Attribution` 来源声明头（`kind=skill;agentSource=dknowc-trusted-search;version=…;channel=skillhub`，json 字段名保持 `source`、仅头内键名为 `agentSource`，读包根 `attribution.json` + SKILL.md version 动态构造；仅统计用、不参与鉴权，读取失败不加头不阻断）。注册链路（challenge/answer/register）另携带 `X-MaaS-Entry-Surface: DIRECT_API`、`X-MaaS-Client-Name: dknowc-trusted-search`、`X-MaaS-Client-Version`（运行时读 SKILL.md）、`X-MaaS-Client-Instance-Id`（服务端签发后落盘 `~/.config/dknowc/maas_client_instance` 并回传，不自行生成）；注册 body 的 `source="agent"` 为注册 API 合同标记（服务端按它放行老用户直接返 Key）。register_key.mjs 退出码：challenge/answer 0=已发码、2=需人工验证链接、3=答错换题（answer，需再答）、4=结果未确认、1=错误；register 可能返回 `pending:true`（密钥准备中，非错误）。
-- 注册成功自动把 Key 写入本机专用配置文件 `~/.config/dknowc/api_key`（600 权限，`--no-persist` 跳过；跳过后可用 `persist` 命令补写），并清理历史 `~/.zshrc` Key 块；业务脚本与 `initialize.py` 直读该文件，无需重启宿主。
+- 注册成功自动把 Key 写入本机专用配置文件 `~/.config/dknowc/api_key`（600 权限，`--no-persist` 跳过；跳过后可用 `persist` 命令补写），脚本不读取、不写入、不改写任何 shell 配置文件（历史 Key 标记块请用户自行处理）；业务脚本与 `initialize.py` 直读该文件，无需重启宿主。
 - 返回的 `apiKey` 先供当前任务临时注入 `DKNOWC_API_KEY` 继续执行。
 - MaaS 平台登录页：`https://platform.dknowc.cn/auth/#/login`
 
@@ -62,7 +62,7 @@ python3 scripts/initialize.py
 ## 常用测试
 
 ```bash
-python3 -m py_compile scripts/api_key.py scripts/initialize.py scripts/trusted_search.py scripts/deep_query.py scripts/mcp_convert.py scripts/merge_search_results.py scripts/chart_embed.py scripts/render_trace_html.py scripts/deliver_outputs.py scripts/check_release.py
+python3 -m py_compile scripts/api_key.py scripts/initialize.py scripts/trusted_search.py scripts/deep_query.py scripts/merge_search_results.py scripts/chart_embed.py scripts/render_trace_html.py scripts/deliver_outputs.py scripts/check_release.py
 node --check scripts/register_key.mjs
 python3 scripts/check_release.py
 ```

@@ -31,6 +31,10 @@ BANNED_TERMS = (
 ALLOWED_API_KEY_VALUES = {"", "your_api_key_here", "你的深知可信搜索 API Key", "你的深知搜索 API Key"}
 API_KEY_PATTERN = re.compile(r"(?im)^\s*api_key[^\S\r\n]*=[^\S\r\n]*([^\s#;]+)[^\S\r\n]*$")
 SECRET_TOKEN_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b")
+# 手机号红线（2026-10-29 审核新增）：对外话术/文档不得出现完整 11 位手机号，
+# 也不得出现脱敏形式的具体号码（模板一律用 <脱敏手机号> 占位、运行时由脚本 user_message 填充）
+FULL_PHONE_PATTERN = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+MASKED_PHONE_PATTERN = re.compile(r"1[3-9]\d\*{4}\d{4}")
 
 
 def main():
@@ -67,6 +71,11 @@ def main():
                     findings.append(f"{path.relative_to(SKILL_ROOT)}: 发现非占位符 api_key")
         if SECRET_TOKEN_PATTERN.search(text):
             findings.append(f"{path.relative_to(SKILL_ROOT)}: 发现疑似 API Key")
+        for line_number, line in enumerate(text.splitlines(), 1):
+            if FULL_PHONE_PATTERN.search(line):
+                findings.append(f"{path.relative_to(SKILL_ROOT)}:{line_number}: 发现完整手机号（不得写入对外包）")
+            if MASKED_PHONE_PATTERN.search(line):
+                findings.append(f"{path.relative_to(SKILL_ROOT)}:{line_number}: 发现脱敏手机号具体示例（请改用 <脱敏手机号> 占位）")
 
     if findings:
         print("发布检查失败：发现不应进入 SkillHub 公开包的内容")
