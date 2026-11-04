@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// 国内 MaaS 注册助手（供 skillhub skill 调用；纯 node，内置 fetch，无三方依赖）。
+// 国内 MaaS 注册助手（纯 node，内置 fetch，无三方依赖）。
 //   node register_key.mjs [--guide URL] challenge --phone <p> [--channel <c>]
 //     读官方 Agent 注册指引 → 申请一道文字题 → 本机保存会话与题目；退出 0 返回题目，
 //     退出 2 表示平台要求人工图片验证（返回 verificationUrl），退出 1 为失败。
 //   node register_key.mjs answer --phone <p> --answer <非负整数>
 //     提交答案；答对即申请发码。退出 0=已发短信；3=答错换题（JSON 带新 question，需再答）；
 //     2=转人工接手；4=发送结果未确认（不重发）；1=失败。
-//   node register_key.mjs register --phone <p> --vcode <c> [--type 11] [--organ ..] [--name ..] [--channel ..] [--source ..] [--password ..] [--new-key] [--no-persist]
+//   node register_key.mjs register --phone <p> --vcode <c> [--organ ..] [--name ..] [--channel ..] [--source ..] [--password ..] [--new-key] [--no-persist]
 //     可能返回 pending:true（账号已创建、密钥资源准备中）——非错误，稍后同参数重试一次。
 //   node register_key.mjs save-key     # 把 MCP create_api_key 拿到的密钥落盘（stdin 优先，或 --api-key）
 //   node register_key.mjs persist      # 事后补持久化：从环境变量（或 --api-key）读 Key 写入专用配置文件
@@ -26,7 +26,8 @@ const __dirname = path.dirname(__filename);
 const DEFAULT_BASE = "https://platform.dknowc.cn/auth/home/userAuto";
 const DEFAULT_OPEN_BASE = "https://open.dknowc.cn";
 const DEFAULT_CHANNEL = "8C8D411C-6A46-4E99-887D-87D9A1329930";
-const DEFAULT_TYPE = "11";
+// 2026-11-04：register 请求不再传 type——平台 Key 为通用 Key、与 type 无关
+// （实测不传 type 服务端参数校验照常通过，与带 type 响应一致）。
 // body 的 source 是注册 API 的合同标记：服务端按 source="agent" 放行"老用户直接返 Key"
 // 路径（生产环境可能出现：source 传 skill 标识时返回"用户已存在！"错误，
 // source=agent 时正常返回 Key）。它与 X-Dknowc-Attribution 统计声明里的 skill 标识是两个
@@ -755,7 +756,6 @@ async function main() {
       phone: a.phone,
       vcode: a.vcode,
       password: a.password && a.password !== true ? a.password : genPassword(),
-      type: a.type && a.type !== true ? a.type : DEFAULT_TYPE,
       organ: a.organ && a.organ !== true ? a.organ : "个人",
       name: a.name && a.name !== true ? a.name : "用户",
       apiKeyName: a["apikey-name"] && a["apikey-name"] !== true ? a["apikey-name"] : "agent-key",
@@ -786,7 +786,7 @@ async function main() {
       const keyName = a["new-key-name"] && a["new-key-name"] !== true ? a["new-key-name"] : payload.apiKeyName;
       const keyRemark = a["new-key-remark"] && a["new-key-remark"] !== true
         ? a["new-key-remark"]
-        : "由 SkillHub 深知可信搜索按用户要求重新生成";
+        : "由深知可信搜索按用户要求重新生成";
       const { result, apiKey } = await createNewApiKey(
         a["open-base"] && a["open-base"] !== true ? a["open-base"] : DEFAULT_OPEN_BASE,
         data.apiKey,

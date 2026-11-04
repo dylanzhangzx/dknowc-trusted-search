@@ -22,12 +22,7 @@ SKIP_FILES = {"CHANGE_log.md"}
 BANNED_FILES = {"config.ini", "_meta.json", "config.ini.example"}
 BANNED_ARTIFACT_NAMES = {".DS_Store"}
 BANNED_ARTIFACT_SUFFIXES = {".pyc", ".pyo"}
-BANNED_TERMS = (
-    "广东省政务服务和数据管理" + "局",
-    "广东省政数" + "局",
-    "粤政" + "数",
-    "粤政" + "易",
-)
+BANNED_TERMS: tuple = ()  # 内部客户名单不随公开包分发
 ALLOWED_API_KEY_VALUES = {"", "your_api_key_here", "你的深知可信搜索 API Key", "你的深知搜索 API Key"}
 API_KEY_PATTERN = re.compile(r"(?im)^\s*api_key[^\S\r\n]*=[^\S\r\n]*([^\s#;]+)[^\S\r\n]*$")
 SECRET_TOKEN_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b")
