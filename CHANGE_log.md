@@ -1,11 +1,35 @@
 # 更新日志
 
-> 同号修正（2026-11-04，随母版，版本号不升）：验包 name 校验错配修复——原 update_skill.py 以本地 SKILL.md name 与官方 maas 包 name 严格相等校验，本地 name 特化渠道（skills-sh ASCII 形态）升级必 exit 3；母版 initialize.py 新增常量 `UPDATE_TARGET_NAME`、update_skill.py 验包改用该常量并删 local_name 读取。本渠道同步此三处（initialize.py / update_skill.py / 本条）。
-## 1.7.1-skills-sh - 2026-11-04
+## 1.7.2-skills-sh - 2026-11-09
 
-- 同步 SkillHub 母版 `1.7.1`（含 1.7.0＋1.7.1 累积增量）：交付形态跟随任务（任务型正文＝成品内容全文、唯一文件产物＝核验报告 HTML、聊天双形态、成品内禁分析报告式结构标题、依据口语化转述）；聊天回复禁 `[n]` 角标；版本自检与引导升级（`initialize.py` update 字段＋新增 `scripts/update_skill.py`，打包白名单 17→18；升级统一收敛 maas 官方包，`UPDATE_TARGET_SLUG` 保持 `dknowc-trusted-search-maas` 不变）；register 请求体不再传 `type`（Key 为通用 Key；`source=\"agent\"` 合同标记保留）。
-- 渠道化照 1.6.2 规则执行并扩大标识清理：除三件套外，register_key 头注释与新建 Key 备注、initialize docstring、render 模块注释与 `--help` 描述、attribution 声明示例、README 声明示例中的渠道字样全部中性化（非 skillhub 包 `grep -i skillhub` 清零）。
-- 使用skills.sh注册渠道码 `8C8D411C-6A46-4E99-887D-87D9A1329930`，slug `dknowc-trusted-search-skills-sh`，来源声明 channel `skills-sh`。
+- 同步 SkillHub 母版 `1.7.2`：三阶段检索降级链（深知检索 → 可信联网 `--search-channel webSearch` → 宿主 WebSearch，新增 `scripts/websearch_convert.py` 统一转换，打包 19 文件）；`merge_search_results.py` 权威优先（同 URL 库内/官方整体胜出，外部段落不污染官方卡）＋每路过程统计按路次回滚；报告呈现口径（内部检索词不进入用户可见报告，外部材料只标「非官方来源」）；Key 安全（stdout 不返回明文，0600 临时文件 + 原子 rename，写入失败停止检索）。
+- 渠道化与去标识沿用 1.7.1 规则：使用skills.sh注册渠道码 `8C8D411C-6A46-4E99-887D-87D9A1329930`，slug `dknowc-trusted-search-skills-sh`，来源声明 channel `skills-sh`；非 skillhub 包 `grep -i skillhub` 清零。
+
+## [1.7.2] - 2026-11-09（三阶段检索：外部联网结果纳入结论与核验报告）
+
+> **2026-11-09 审核驳回整改（同号 1.7.2，不升版本号）**
+> 1. **阻塞 1（已修）**：官方 vs 外部同 URL 改为**官方记录整体胜出、与 `--input` 顺序无关**——外部段落、数据源、发布日期、文号、快照、检索通道、分组一律不进入官方卡（近似去重分支同步）；官方替换/丢弃外部卡及近似重复丢弃外部卡时，同步回滚 `search_meta.calls` 的 `new_articles` 与 `added_paragraphs`（含被丢弃卡此前吸收的其他外部路补段贡献），过程条「新增 N 篇 / 补充 K 段」不再随输入顺序变化；新增正/反输入顺序、官方缺字段不被外部元数据补齐、过程统计顺序无关、渲染无徽标/提示条回归。
+> 2. **阻塞 2（已修）**：`register_key.mjs` 持久化失败/`--no-persist` 时不再向 stdout 返回明文 Key（固定 `apiKey:null`，新增 `apiKeyUnavailable/searchReady`，未落盘时 `status=false` 并提示修复权限后重试）；写入改为临时文件 0600 + `rename` 原子替换，已存在的 0644 旧文件会被替换为 0600；修正“已写入本机”误报。新增 `tests/test_register_key_persist.py`（10 项）。
+> 3. **重要 1（已修）**：`websearch_convert.py` 与 `merge_search_results.py` 的 tracking 参数集合对齐（补 `share_source/ref_src/source/campaign`）；新增 `?source=wechat` 同文合并回归。
+> 4. **重要 2（已修）**：`external_materials` 与知识专库页脚改按 `unofficial/pending` 统计，阶段二（`深知可信搜索·联网`）也触发正文提示条/页脚/自验收文案切换；新增阶段二报告回归。
+> 5. **重要 3（已修）**：材料级 `核验/verification/核验说明` 也经 `user_facing_text` 过滤，不再绕过内部词清洗；回归断言 HTML 0 命中。
+> 6. **建议项**：转换器与渲染层均拒绝带 userinfo 的 URL；SKILL.md 权限声明补齐 `~/.config/dknowc/{api_key,update_check.json,maas_client_instance,maas_agent_challenge.json}` 与 official-docs 工作区；来源行在仅外部材料时回退「深知可信搜索（含公开网络材料）」；`check_release.py` 增加内部人名/称呼扫描（检查器自身跳过）。
+> 7. **验证**：`tests/test_websearch_convert.py` 81/81、`tests/test_register_key_persist.py` 10/10；py_compile / node --check / check_release 全过。
+> 8. **五验待确认项（已修）**：多个 `--input` 复用同一 `--search-key` 时，渲染层过程条原先只取同名 `calls` 的第一条；现改为汇总该分组全部同名路次的 `new_articles/added_paragraphs`，与分组召回/采用数一致。新增同名分组增量汇总回归。
+> 9. **六验重要项（已修）**：同权威性质的近似重复卡被丢弃时，除合并段落/`_para_contrib` 外，同步回滚该卡所属路次的 `new_articles -1`；多个外部输入复用同一分组标签时，不再出现「召回 1 条 / 新增 2 篇」。新增双顺序真实 merge 回归。
+
+背景：徐剑军 2026-10-21 结论（暂不支持外国政策；广泛使用 WebSearch，同时使用可信搜索自动联网模式，有原段优先；非官方来源采纳时提醒并写进溯源核验报告）与 2026-11-07 催办「第三方搜索接口的接入，跟进后告诉我结果」。2026-11-09 实测发现：`--search-channel webSearch` 对国内政策有效（7–29 条，带原段与源网址），但对「邮轮赴日签证」及日本《出入国管理法》相关问法均为 0 条；短问法「邮轮签证」反而召回 14 条「外国旅游团乘邮轮入境中国免签」（方向相反），原缺陷有复发风险；宿主 WebSearch 能命中日本入管法第 14 条/第 14 条之 2、船舶观光上陆许可等原文级线索。因此把检索固化为三阶段，并打通第三阶段结果进入结论与报告的链路。
+
+1. **三阶段检索规则**：阶段一深知检索（可信/深度＋补搜）→ 阶段二 `trusted_search.py --search-channel webSearch`（联网材料统一补 `非官方来源`）→ 阶段三宿主 WebSearch；「搜不到」判据统一为「无结果，或核心事实无直接支撑（含方向不一致）」，不得因有返回条数就停。
+2. **新增 `scripts/websearch_convert.py`**：把宿主 WebSearch 结果转为与可信搜索同构的通用「检索文章」形态。兼容裸数组、`results/items/webPages.value/organic_results/output[].results`、Anthropic `web_search_result` + `cited_text`；只有标题+链接、没有摘录的条目丢弃（避免报告核验变红）；仅接受 http/https、URL 归一化去重；段落切分与条数/长度上限；统一打 `检索通道=宿主 WebSearch`、`非官方来源=true`、`数据权威性=非权威`。
+3. **报告呈现口径（用户可见）**：三阶段、可信联网、宿主 WebSearch 都是内部实现说法，**不写进用户可见报告**；过程条/hero 沿用既有「深度搜索/可信补搜」口径，明细行只保留「深度搜索/可信搜索」，来源行过滤内部通道 token；外部材料的来源性质只通过「**非官方来源**」徽标与正文页统一来源提示条表达；外部资料分组统一命名「公开资料补充」；**自检说明与 `--search-key` 分组标签同样过滤内部词**（统一显示「公开网络材料／补充检索／公开资料补充」）；**正文页引用公开网络材料时增加统一来源提示条**（本页部分材料来自公开网络，已标注「非官方来源」），逐条标记仍由材料卡/引文胶囊承担；知识专库页脚与自验收文案在含公开资料时切换为"部分材料来自公开网络，已标注非官方来源"。
+4. **merge 权威优先**：同一 URL 同时被库内/可信与外部联网召回时，库内/可信材料优先——不吸收外部段落、不被外部标记污染；仅阶段二（可信联网）与阶段三（宿主 WebSearch）同 URL 时才并段落并保留非官方标记；`非官方来源` 字段透传；去重键改用归一化 URL（去 fragment/tracking/尾斜杠）。
+5. **规则与文档**：SKILL.md 三阶段降级链、标准工作流 step3、自检⑤、聊天回复注记、参数说明同步；README 能力范围同步；产品文档版本/检索分级/接口/版本历史/文件清单同步（并修正过期清单与"不做通用联网搜索"的冲突表述）。
+6. **测试**：新增 `tests/test_websearch_convert.py`（多宿主格式、cited_text、无摘录丢弃、URL 校验/归一、模板过滤、切分/上限、退出码、merge 权威优先，39 项全过）；E2E 邮轮题走通「阶段一 0 条 → 阶段二 0 条 → 阶段三 WebSearch → 转换 → merge → 渲染」，报告出现非官方来源标记与正文页统一提示条。
+
+- 版本：1.7.2；包 19 文件（新增 `scripts/websearch_convert.py`）。
+- 验证：py_compile / node --check / check_release / 转换器 39 项 / E2E 渲染检查全过。
+- 渠道：skillhub 先行；其余渠道按 public 对齐流程同步（volcengine 维持 1.6.2）。
 
 ### 三审整改（同日，版本号仍 1.6.2）
 
@@ -78,6 +102,9 @@
 > ①**register 移除 type=11**（Dylan 2026-11-04 定规则：平台 Key 为通用 Key、与 type 无关）：register_key.mjs 删 `DEFAULT_TYPE` 常量、register payload `type` 字段与用法注释中的 `[--type 11]`；**服务端实测**——同一手机号＋错误验证码探测三种请求（带 type=11／不带 type／连 channel 与 source 都不带）均返回同一 `{"msg":"请发送验证码"}`，证明参数校验层不校验 type、移除无影响；sendMessage 的 `type:"register"` 为动作类型，保留。SKILL.md「脚本默认固定 type=11」表述删除，source="agent" 合同标记说明完整保留。
 > ②**"主动升级无视拒绝记录"落地**：update_skill.py 新增 `--force`（与 `--yes` 同用）——`reason=declined` 时常规路径退出 2，`--yes --force` 跳过拒绝门槛但**仍走全部下载／验包／备份／回滚校验**；其余无更新场景（远端不高于本地／检查失败）force 不生效。SKILL.md 规则同步为「用户主动要求升级→--yes --force」。
 > 验证：升级专项新增 U10（declined 状态普通 --yes 仍 exit 2；--yes --force 成功升级 1.0.0→1.5.1）；node --check／py_compile／check_release／全量回归通过。
+
+> 同号修正（2026-11-04，渠道包审核发现的 update_skill.py 校验缺陷，版本号不升）：**验包 name 校验错配**——原实现以本地 SKILL.md name 作 expect_name 与下载的官方 maas 包 name 严格相等校验，skills-sh 渠道本地 name 为既定 ASCII 形态（`dknowc-trusted-search`，npx skills 安装目录名需要）→ 该渠道升级必 exit 3、永久无法经脚本升级（skill审核 mock 实测复现）。修复：验包目的为防投毒（确认下载的是官方包），官方包 name 与 slug/downloadName 同为已知常量——initialize.py 新增常量 `UPDATE_TARGET_NAME`（与其余升级常量并列），update_skill.py 验包改用该常量、删除 local_name 读取（local_version 保留）。一处修复覆盖全部渠道（含未来 name 特化渠道），无渠道级代码分叉；升级后本地 name 随包收敛为官方 name 属渠道收敛预期行为。
+> 验证：升级专项新增 U12（本地 name=ASCII skills-sh 形态：升级成功 1.0.0→1.5.1、升级后 name 收敛为官方包 name），专项 24/24＋自检 16/16；py_compile／check_release 通过。
 
 > 五轮整改（2026-11-04，skill审核《增量复审-4》"有条件通过"剩余 1 项，版本号不升）：
 > **--force 补版本方向复核**：原实现只按 reason=declined 放行，未再校验远端高于本地（审核实测：同版本 1.7.0→1.7.0 重装、目录回退 1.7.0→1.6.9 降级均被 force 放行）。修复：`forced = --force ∧ reason=declined ∧ 远端登记版本>本地版本`（semver 复核，与 initialize「绝不提示降级」口径一致）——同版本重装与降级（含目录版本回退场景）一律 exit 2 不动盘；其余无更新场景 force 依旧不生效。
@@ -410,7 +437,7 @@ WB 测试时 Agent 在日志里反馈："答案角标编号必须等于合并产
 
 ### 验证（一体化）
 
-- 合成 fixture 端到端：9 城 × 2 指标 + 占比数据 → 单份 HTML 612KB，含 3 个图表章节（2 指标柱 + 环形）、echarts 内联、图内数据项带来源 URL、章节目录含图表条目、核验单全绿（依据溯源 9/9、引用对应 9/9）。
+- 合成 fixture 端到端：9 城 × 2 指标 + 占比数据 → 单份 HTML 612KB，含 3 个图表章节（2 指标柱 + 环形）、echarts 内联、图内数据项带来源 URL、章节目录含图表条目、核验单全绿（依据溯源 10/10、引用对应 10/10）。
 - 降级路径：`--charts-json` 传不存在的文件 / 数据不足 → stderr 提示 + 报告照常产出，无空白图。
 - 编译检查：`scripts/chart_embed.py` 纳入 `py_compile` 清单（README）；`render_policy_visualization.py` 已移除，有关引用清零。
 

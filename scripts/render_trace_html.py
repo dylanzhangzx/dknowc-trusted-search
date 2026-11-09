@@ -412,7 +412,7 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
         "excerpt": segment.get("text") or paragraph_text(item),
         "section": first_str(item.get("正文对应"), item.get("section"), item.get("支撑")),
         "kind": first_str(item.get("类型"), item.get("type"), item.get("素材类型"), vo.get("typeName"), "材料"),
-        "verify_note": first_str(item.get("核验"), item.get("verification"), item.get("核验说明")),
+        "verify_note": user_facing_text(first_str(item.get("核验"), item.get("verification"), item.get("核验说明"))),
         "area": first_str(item.get("intentionArea"), item.get("area"), item.get("地域")),
     }
     # 段落级数据（多段分块展示用）：每段 {chain:[文章,章节,子节...], text}
@@ -434,7 +434,8 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
     # 发文字号（接口 policyFiles.writtenText，本地标题匹配）
     source["doc_number"] = first_str(item.get("文号"), item.get("doc_number"))
     # 所属搜索条件（多路检索分组）与引用状态（未引用=接口召回但正文未采用）
-    source["search_key"] = first_str(item.get("搜索条件"), item.get("search_key"))
+    # 分组标签面向用户：过滤「可信联网/外部联网/阶段X」等内部实现词
+    source["search_key"] = user_facing_text(first_str(item.get("搜索条件"), item.get("search_key")))
     # 检索通道（深知深度搜索 / 深知可信搜索）：由检索脚本在产物上打标、merge 透传，
     # 供过程条/hero 按接口通道拆分计数；历史 JSON 无该字段时为空（渲染层回退旧文案）
     source["channel"] = first_str(item.get("检索通道"), item.get("channel"))
@@ -442,6 +443,7 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
     # 双口径判定：联网路脚本打标 非官方来源=True；或接口 dataAuthority 返回 数据权威性=非权威。
     source["unofficial"] = bool(item.get("非官方来源")) or str(
         item.get("数据权威性") or item.get("authority") or "").strip() in ("非权威", "non-authoritative")
+    source["pending"] = bool(item.get("待核验") or item.get("pending"))
     source["used"] = item.get("已引用", item.get("used", True))
     if not isinstance(source["used"], bool):
         source["used"] = True
@@ -652,6 +654,32 @@ def classify_check_value(raw: Any) -> Tuple[str, str]:
     return "none", text
 
 
+# 用户可见报告不得暴露内部检索实现（三阶段/联网通道）；自检说明里模型常写这些词，
+# 渲染前统一换成用户能理解的口径。只作用于自检说明，不改正文与材料内容。
+USER_FACING_REPLACEMENTS = (
+    ("宿主 WebSearch", "公开网络检索"),
+    ("外部联网材料", "公开网络材料"),
+    ("外部联网", "公开网络"),
+    ("可信联网", "可信搜索"),
+    ("阶段三", "补充检索"),
+    ("阶段二", "补充检索"),
+    ("阶段一", "检索"),
+    # 外部来源只标「非官方来源」；核验由 AI 完成，不再叠加「待核验」
+    ("非官方来源 · 待核验", "非官方来源"),
+    ("（非官方来源，待核验）", "（非官方来源）"),
+    ("(非官方来源，待核验)", "(非官方来源)"),
+    ("非官方来源/待核验", "非官方来源"),
+    ("非官方来源、待核验", "非官方来源"),
+)
+
+
+def user_facing_text(text: str) -> str:
+    out = str(text or "")
+    for src, dst in USER_FACING_REPLACEMENTS:
+        out = out.replace(src, dst)
+    return out
+
+
 def normalize_self_check(raw: Any) -> Optional[Dict[str, Tuple[str, str]]]:
     if not isinstance(raw, dict):
         return None
@@ -664,7 +692,7 @@ def normalize_self_check(raw: Any) -> Optional[Dict[str, Tuple[str, str]]]:
         if not label:
             continue
         status, note = classify_check_value(value)
-        items[label] = (status, note)
+        items[label] = (status, user_facing_text(note))
     return items or None
 
 
@@ -775,6 +803,55 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
 # 过程回顾 / 热词（真实计算，不虚构流程）
 # ============================================================
 
+def route_kind(channel: str) -> str:
+    """检索通道归类：web=宿主 WebSearch / deep=深度搜索 / trusted=可信搜索。"""
+    text = str(channel or "")
+    if "WebSearch" in text or "宿主" in text:
+        return "web"
+    if "深度" in text:
+        return "deep"
+    if "可信" in text:
+        return "trusted"
+    return ""
+
+
+def channel_label(channel: str) -> str:
+    """过程条明细的通道标签：只暴露产品既有口径（深度搜索/可信搜索）。
+
+    三阶段、可信联网、宿主 WebSearch 属内部实现细节，不进入用户可见报告；
+    外部材料的来源性质由材料卡上的「非官方来源」徽标表达。
+    """
+    kind = route_kind(channel)
+    if kind == "deep":
+        return "深度搜索"
+    if kind == "trusted":
+        return "可信搜索"
+    return ""
+
+
+def route_summary(deep_n: int, trusted_n: int, n_searches: int) -> str:
+    """过程条/hero 的检索摘要：保留 1.7.1 既有口径，不暴露三阶段/外部联网细节。"""
+    parts = []
+    if deep_n:
+        parts.append(f"深度搜索 {deep_n} 路")
+    if trusted_n:
+        parts.append(f"可信补搜 {trusted_n} 次")
+    return " · ".join(parts) if parts else f"深知检索 {n_searches} 路"
+
+
+def channel_tokens(channels: List[str]) -> List[str]:
+    """来源行通道 token 汇总：只保留产品名，过滤内部通道标记（联网/宿主 WebSearch）。"""
+    tokens: List[str] = []
+    for channel in channels:
+        for token in re.split(r"[、·]", str(channel or "")):
+            token = token.strip()
+            if not token or token in ("联网", "可信联网", "宿主 WebSearch"):
+                continue
+            if token not in tokens:
+                tokens.append(token)
+    return tokens
+
+
 def compute_process_stats(sources: List[Dict[str, str]], answer: str,
                          calls: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """过程回顾条数据：检索次数、每组检索的召回/采用数、入库与引用计数。
@@ -801,13 +878,18 @@ def compute_process_stats(sources: List[Dict[str, str]], answer: str,
         # 过程条展示『该路新增 N 篇 · 补充 K 段』——补搜的实际贡献不被分组统计吞掉
         delta = ""
         if calls:
-            matched = next((c for c in calls if str(c.get("label") or "").strip() == key), None)
-            if matched is None:
-                matched = next((c for c in calls
-                                if str(c.get("label") or "").strip()
-                                and key.startswith(str(c.get("label")).strip()[:12])), None)
+            # 同名分组可能对应多条 --input（多个补搜复用同一 --search-key）。
+            # 过程条按分组展示，必须汇总该组全部同名 calls；只取第一条会漏算
+            # 后续同名路的“新增/补段”增量（2026-11-09 五验待确认项）。
+            matched = [c for c in calls if str(c.get("label") or "").strip() == key]
+            if not matched:
+                matched = [c for c in calls
+                           if str(c.get("label") or "").strip()
+                           and key.startswith(str(c.get("label")).strip()[:12])]
             if matched:
-                delta = f"新增 {matched.get('new_articles', 0)} 篇 · 补充 {matched.get('added_paragraphs', 0)} 段"
+                new_total = sum(int(c.get("new_articles") or 0) for c in matched)
+                added_total = sum(int(c.get("added_paragraphs") or 0) for c in matched)
+                delta = f"新增 {new_total} 篇 · 补充 {added_total} 段"
         cond_rows.append({
             "key": key,
             "total": len(group),
@@ -819,8 +901,15 @@ def compute_process_stats(sources: List[Dict[str, str]], answer: str,
     # 深度/可信互斥计数（2026-10-16 修复）：多数通道为拼接值（"深知深度搜索、深知可信搜索"）
     # 的组同时含两个关键词，若不互斥会被两边各计一次——WB 实测"补搜 10 次"被虚报成 13 次，
     # 与过程条明细行（if/else 口径）自相矛盾。此处与明细行同口径：含"深度"优先归深度。
-    deep_routes = sum(1 for r in cond_rows if "深度" in r.get("channel", ""))
-    trusted_routes = sum(1 for r in cond_rows if "可信" in r.get("channel", "") and "深度" not in r.get("channel", ""))
+    deep_routes = sum(1 for r in cond_rows if route_kind(r.get("channel", "")) == "deep")
+    trusted_routes = sum(1 for r in cond_rows if route_kind(r.get("channel", "")) == "trusted")
+    trusted_web_routes = sum(1 for r in cond_rows
+                             if route_kind(r.get("channel", "")) == "trusted"
+                             and "联网" in r.get("channel", ""))
+    web_routes = sum(1 for r in cond_rows if route_kind(r.get("channel", "")) == "web")
+    # 外部材料按 unofficial 判定，覆盖阶段二（深知可信搜索·联网，route_kind=trusted）
+    # 与阶段三（宿主 WebSearch）；不能只看 pending/web，否则阶段二口径切换不生效。
+    external_materials = sum(1 for s in sources if s.get("unofficial") or s.get("pending"))
     used_count = sum(1 for s in sources if s.get("used", True))
     unused_count = len(sources) - used_count
     n_cite_marks = len(re.findall(r"\[(\d+)\]", answer))
@@ -829,6 +918,9 @@ def compute_process_stats(sources: List[Dict[str, str]], answer: str,
         "n_searches": n_searches,
         "deep_routes": deep_routes,
         "trusted_routes": trusted_routes,
+        "trusted_web_routes": trusted_web_routes,
+        "web_routes": web_routes,
+        "external_materials": external_materials,
         "has_cond_detail": bool(cond_rows),
         "n_materials": len(sources),
         "used_count": used_count,
@@ -872,9 +964,15 @@ def render_markdown_table(lines: List[str], citation_repl) -> str:
 
 
 def _safe_url(url: str) -> str:
-    """外链协议白名单（1.6.0）：仅允许 http/https，其余（javascript:/data: 等）置空不渲染。"""
+    """外链协议白名单（1.6.0）：仅允许 http/https，其余（javascript:/data: 等）置空不渲染。
+
+    2026-11-09 审核补充：拒绝带 userinfo 的 URL（https://user:pass@host/...），
+    避免凭据被原样写进报告。
+    """
     value = str(url or "").strip()
     if value.lower().startswith(("http://", "https://")):
+        if re.match(r"^https?://[^/?#]*@", value, re.I):
+            return ""
         return value
     return ""
 
@@ -965,7 +1063,8 @@ def parse_answer_blocks(answer: str, valid_ids: set, chip_map: Optional[Dict[str
         site_html = (f'<span class="jb-site"><span class="dot"></span>{esc(jb.get("site") or "")}</span>'
                      if (jb.get("site") or "").strip() else "")
         if jb.get("unofficial"):
-            site_html = ('<span class="jb-unofficial" title="联网检索的非官方来源，仅供参考，建议以官方口径复核">非官方来源</span>'
+            _unofficial_text = "非官方来源"
+            site_html = (f'<span class="jb-unofficial" title="公开网络检索的非官方来源，仅供参考，建议以官方口径复核">{_unofficial_text}</span>'
                          + site_html)
         return (
             f'<span class="jb" data-cite="{esc(cid)}">'
@@ -1116,6 +1215,7 @@ def build_chip_data(sources: List[Dict[str, str]]) -> Dict[str, Dict[str, str]]:
             "excerpt": (source.get("excerpt") or "").strip(),
             "segments": source.get("segments") or [],
             "unofficial": bool(source.get("unofficial")),
+            "pending": bool(source.get("pending")),
         }
     return chip_map
 
@@ -1441,7 +1541,8 @@ def render_source_card(source: Dict[str, str], for_print: bool = False) -> str:
     # 已引用材料显示角标编号；未引用召回材料显示"未引用"灰标（不占正文角标号）
     id_html = f'<span class="sc-id">[{esc(source["id"])}]</span>' if source.get("used", True) else '<span class="sc-unused">未引用</span>'
     # 非官方来源徽标（1.6.0）：联网路召回的非权威站点材料，报告页与知识专库卡统一标注
-    unofficial_badge = ('<span class="sc-unofficial" title="联网检索的非官方来源，仅供参考，建议以官方口径复核">非官方来源</span>'
+    _unofficial_text = "非官方来源"
+    unofficial_badge = (f'<span class="sc-unofficial" title="公开网络检索的非官方来源，仅供参考，建议以官方口径复核">{_unofficial_text}</span>'
                         if source.get("unofficial") else "")
     body_html = (f'<div class="sc-head">{id_html}'
                  f'<span class="sc-type">{esc(source["type_label"])}</span>{conf_badge}{unofficial_badge}{vk}</div>'
@@ -1465,21 +1566,16 @@ def render_process_bar(stats: Dict[str, Any], verification: Dict[str, Any]) -> s
     ov = verification["overall"]
     tr = verification["traceability"]
     first_query = stats["conds"][0]["key"] if stats["conds"] else ""
-    # 步骤一标题按接口通道拆分（深度搜索与可信搜索是两个接口，不混计成一个数）；
+    # 步骤一标题按接口通道拆分（深度搜索/可信联网/宿主 WebSearch 是不同通道，不混计）；
     # 无通道信息（历史 JSON）时退回"深知检索 N 路"
     deep_n = stats.get("deep_routes", 0)
     trusted_n = stats.get("trusted_routes", 0)
-    if deep_n and trusted_n:
-        step1_title = f"深度搜索 {deep_n} 路 · 可信补搜 {trusted_n} 次"
-    elif deep_n:
-        step1_title = f"深知深度搜索 {deep_n} 路"
-    elif trusted_n:
-        step1_title = f"深知可信搜索 {trusted_n} 次"
-    else:
-        step1_title = f"深知检索 {stats['n_searches']} 路"
+    step1_title = route_summary(deep_n, trusted_n, stats["n_searches"])
     detail_rows = "".join(
         f'<div class="pd-row"><b>{esc(row["key"])}'
-        + (f'（{"深度搜索" if "深度" in row.get("channel", "") else "可信搜索"}）' if row.get("channel") else "")
+        + (f'（{esc(channel_label(row.get("channel", "")))}）'
+           if channel_label(row.get("channel", ""))
+           and channel_label(row.get("channel", "")) != row["key"] else "")
         + f'</b><span>召回 {row["total"]} 条 · 正文采用 {row["used"]} 条'
         + (f' · {esc(row["delta"])}' if row.get("delta") else '')
         + '</span></div>'
@@ -1495,7 +1591,12 @@ def render_process_bar(stats: Dict[str, Any], verification: Dict[str, Any]) -> s
     step4_state = "done" if ov["passed"] else "bad"
     step4_icon = "✓" if ov["passed"] else "!"
     step4_label = "核验完成" if ov["passed"] else "核验未完全通过"
-    step4_sub = "结论：正文依据逐条对过原文" if ov["passed"] else esc(short("；".join(ov["reasons"]) or "见核验报告单", 30))
+    step4_sub = (
+        "结论：正文依据逐条对过来源（公开网络材料已标注非官方来源）"
+        if ov["passed"] and stats.get("external_materials")
+        else "结论：正文依据逐条对过原文" if ov["passed"]
+        else esc(short("；".join(ov["reasons"]) or "见核验报告单", 30))
+    )
     # 研究资料统计（1.5.0）：--research-notes-file 传入时在步骤 2 体现（事实/口径行数）；
     # 未传不显示（如实，不虚构）
     rn = stats.get("research_notes") or {}
@@ -1574,6 +1675,9 @@ def render_library_view(sources: List[Dict[str, str]], doc_title: str = "") -> s
     cards_html += "".join(render_source_card(s) for s in unused_sources)
 
     lib_title = f"知识专库：{doc_title}" if doc_title.strip() else "知识专库"
+    has_external = any(s.get("unofficial") or s.get("pending") for s in sources)
+    lib_foot = ("来源：深知可信搜索 · 每段摘录均取自原文原段" if not has_external
+                else "来源：深知可信搜索 · 部分材料来自公开网络，已标注非官方来源，请以官方口径复核")
     return f"""
     <section class="view" id="view-library" aria-label="知识专库">
       <div class="lib-head">
@@ -1586,7 +1690,7 @@ def render_library_view(sources: List[Dict[str, str]], doc_title: str = "") -> s
       </div>
       <div class="lib-list" id="lib-list">{cards_html}</div>
       <div class="lib-empty hide" id="lib-empty">没有符合当前筛选的来源文章。</div>
-      <div class="lib-foot">来源：深知可信搜索 · 每段摘录均取自原文原段</div>
+      <div class="lib-foot">{esc(lib_foot)}</div>
     </section>"""
 
 
@@ -1795,6 +1899,7 @@ a{color:var(--brand)}
 
 /* 正文（原型复刻）：章节 / 段落 / 角标 / 句后溯源卡 */
 .doc-paper{background:#fff;border-radius:14px;box-shadow:var(--shadow-1);padding:26px 34px 22px;margin:0 0 16px}
+.body-external-note{font-size:12px;line-height:1.65;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 11px;margin:0 0 16px}
 .chapter{margin:40px 0 0}
 .chapter:first-child{margin-top:6px}
 .ch-head{display:flex;align-items:center;gap:14px;margin-bottom:18px;scroll-margin-top:86px}
@@ -2492,34 +2597,32 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
 
     meta_bits = []
     if process_stats["n_searches"]:
-        # 检索计数按接口通道拆分显示（深度搜索与可信搜索是两个接口来源）
+        # 检索计数按通道拆分显示（深度搜索/可信联网/宿主 WebSearch 是不同来源）
         _deep_n = process_stats.get("deep_routes", 0)
         _trusted_n = process_stats.get("trusted_routes", 0)
-        if _deep_n and _trusted_n:
-            meta_bits.append(f"深度搜索 {_deep_n} 路 · 可信补搜 {_trusted_n} 次")
-        elif _deep_n:
-            meta_bits.append(f"深知深度搜索 {_deep_n} 路")
-        elif _trusted_n:
-            meta_bits.append(f"深知可信搜索 {_trusted_n} 次")
-        else:
-            meta_bits.append(f"深知检索 {process_stats['n_searches']} 路")
+        meta_bits.append(route_summary(_deep_n, _trusted_n, process_stats["n_searches"]))
     if sources:
         meta_bits.append(f"知识专库文章 {len(sources)} 篇")
     if process_stats["n_cite_marks"]:
         meta_bits.append(f"正文实际引用 {process_stats['n_cite_marks']} 处")
     meta_bits.append(f"生成于 {generated}")
     meta_line = " · ".join(meta_bits)
-    # 来源＝材料实际使用的检索通道（深知深度搜索 / 深知可信搜索，动态汇总）；
-    # 历史产物无通道信息时保留旧文案
-    # 通道 token 汇总：单条材料可能是双通道拼接值（"深知深度搜索、深知可信搜索"），
-    # 按 、 和 · 拆 token 去重再拼接，避免来源行出现重复或拼接串
-    _channels: List[str] = []
-    for s in sources:
-        for _tok in re.split(r"[、·]", (s.get("channel") or "").strip()):
-            _tok = _tok.strip()
-            if _tok and _tok not in _channels:
-                _channels.append(_tok)
-    source_line = " · ".join(_channels) if _channels else "深知可信搜索"
+    # 来源＝材料实际使用的检索通道（深度/可信/宿主 WebSearch，动态汇总）；
+    # 历史产物无通道信息时保留旧文案；孤立「联网」并回「深知可信搜索（联网）」
+    _channels = channel_tokens([s.get("channel") or "" for s in sources])
+    has_external_any = any(s.get("unofficial") or s.get("pending") for s in sources)
+    source_line = (" · ".join(_channels) if _channels
+                   else ("深知可信搜索（含公开网络材料）" if has_external_any else "深知可信搜索"))
+
+    # 正文页的来源性质提示：引用了公开网络材料时，给用户一个可见、统一的标记，
+    # 不暴露三阶段/检索通道；具体逐条标记仍在溯源核验报告的材料卡与引文胶囊上。
+    cited_external = any((s.get("pending") or s.get("unofficial")) and s.get("used", True)
+                         for s in sources)
+    body_external_note = (
+        '<div class="body-external-note">说明：本页部分材料来自公开网络，'
+        '已在溯源核验报告中标注「非官方来源」，请以官方口径复核。</div>'
+        if cited_external else ""
+    )
 
     # 图表并入核验报告（1.4.0 一体化）：有图表数据且包内 ECharts 可用时，
     # 图表并入核验报告（1.4.0 一体化）——交付物始终是**一个** HTML，不再另出独立图表报告。
@@ -2603,6 +2706,7 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
   <main class="view" id="view-body" aria-label="正文">
     <h2 class="paper-title">{esc(display_title)}</h2>
     <div class="doc-paper">
+    {body_external_note}
     {render_section_cards(clean_sections, sources, id_prefix="sec")}
     </div>
     <div class="foot">深知可信搜索 · 正文 ｜ 内容由 AI 生成，仅供参考</div>

@@ -22,7 +22,11 @@ SKIP_FILES = {"CHANGE_log.md"}
 BANNED_FILES = {"config.ini", "_meta.json", "config.ini.example"}
 BANNED_ARTIFACT_NAMES = {".DS_Store"}
 BANNED_ARTIFACT_SUFFIXES = {".pyc", ".pyo"}
-BANNED_TERMS: tuple = ()  # 内部客户名单不随公开包分发
+# 对内人名/内部称呼不随公开包分发（2026-11-09 审核建议：原为空元组，无法拦截）
+BANNED_TERMS: tuple = (
+    "徐剑军", "宋紫嫣", "周领权", "金帅澎", "侍纪伟", "李汉文", "曹余健", "惠晓东",
+    "张子玄", "徐总",
+)
 ALLOWED_API_KEY_VALUES = {"", "your_api_key_here", "你的深知可信搜索 API Key", "你的深知搜索 API Key"}
 API_KEY_PATTERN = re.compile(r"(?im)^\s*api_key[^\S\r\n]*=[^\S\r\n]*([^\s#;]+)[^\S\r\n]*$")
 SECRET_TOKEN_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b")
@@ -51,6 +55,9 @@ def main():
             findings.append(f"{path.relative_to(SKILL_ROOT)}: official-docs/ 工作区内只允许 .gitkeep 占位，公开包不得包含工作区产物")
             continue
         if not path.is_file() or path.name in SKIP_FILES or any(part in SKIP_PARTS for part in path.parts):
+            continue
+        if path.name == "check_release.py":
+            # 检查器自身包含 BANNED_TERMS 名单，跳过自检避免误报
             continue
         try:
             text = path.read_text(encoding="utf-8")

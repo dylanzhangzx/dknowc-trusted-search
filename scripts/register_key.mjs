@@ -323,12 +323,29 @@ async function createNewApiKey(openBase, existingApiKey, name, remark) {
 
 function writeApiKeyToConfigFile(apiKey) {
   // 写本机专用配置文件（纯文本一行 Key，600 权限）；不触碰任何 shell 配置文件。
+  // 安全要求（2026-11-09 审核）：临时文件 0600 + rename 原子替换，确保已存在的
+  // 0644 旧文件被替换为 0600；不使用 writeFileSync 直接覆写（mode 只对新建生效）。
   const filePath = apiKeyFilePath();
+  const dir = path.dirname(filePath);
+  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   try {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(filePath, `${String(apiKey).trim()}\n`, { encoding: "utf8", mode: 0o600 });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(tmpPath, `${String(apiKey).trim()}\n`, { encoding: "utf8", mode: 0o600 });
+    fs.chmodSync(tmpPath, 0o600);
+    try {
+      fs.renameSync(tmpPath, filePath);
+    } catch (renameErr) {
+      // Windows 下目标已存在时 rename 可能 EPERM/EEXIST：先删旧文件再替换。
+      if (process.platform === "win32" && (renameErr.code === "EPERM" || renameErr.code === "EEXIST")) {
+        try { fs.unlinkSync(filePath); } catch { /* 目标不存在时忽略 */ }
+        fs.renameSync(tmpPath, filePath);
+      } else {
+        throw renameErr;
+      }
+    }
     return { written: true, path: filePath, error: null };
   } catch (e) {
+    try { fs.unlinkSync(tmpPath); } catch { /* 清理失败不影响主流程 */ }
     return { written: false, path: filePath, error: e && e.message ? e.message : String(e) };
   }
 }
@@ -803,20 +820,29 @@ async function main() {
     }
     // 注册成功自动持久化到本机专用配置文件 ~/.config/dknowc/api_key（1.3.5 起：
     // 不读写 shell 配置（读取顺序 env→配置文件）。
-    // --no-persist 可跳过；persist 命令保留用于事后手动补持久化。
-    const cfgWrite = ok && apiKeyToSave && !a["no-persist"]
-      ? writeApiKeyToConfigFile(apiKeyToSave)
+    // 安全要求（2026-11-09 审核）：持久化失败或 --no-persist 时不再通过标准输出
+    // 返回明文 Key（避免进入宿主工具日志），而是明确告知未落盘、不得继续检索。
+    const cfgWrite = ok && apiKeyToSave
+      ? (a["no-persist"]
+          ? { written: false, path: apiKeyFilePath(), error: "已跳过持久化（--no-persist）" }
+          : writeApiKeyToConfigFile(apiKeyToSave))
       : { written: false, path: apiKeyFilePath(), error: null };
     // user_message：给用户的固定话术，Agent 必须原样转述，不得改写后发挥。
     // 权益告知（注册赠送 10 万积分 + 实名认证再送 10 万积分）已前移到开通引导
     // （initialize.guide_message / onboarding_scripts S1），此处只做轻确认，避免成功节点信息过重导致转述截断。
     let userMessage;
     if (ok && apiKeyToSave) {
-      userMessage = Boolean(data.existed)
-        ? `这个手机号之前开通过，已直接找回原来的密钥和积分，不用重新注册。我马上开始检索。`
-        : `开通成功，访问密钥已写入本机，注册赠送的 10 万积分已到账。我马上开始检索。`;
+      if (cfgWrite.written) {
+        userMessage = Boolean(data.existed)
+          ? `这个手机号之前开通过，已直接找回原来的密钥和积分，不用重新注册。我马上开始检索。`
+          : `开通成功，访问密钥已写入本机，注册赠送的 10 万积分已到账。我马上开始检索。`;
+      } else {
+        userMessage = `开通成功，但访问密钥未能写入本机安全文件（${cfgWrite.error || "未知原因"}）。请检查 ${cfgWrite.path} 的目录权限后重试；密钥安全落盘前不会继续检索。`;
+      }
       if (newKeyError) {
-        userMessage += ` 另外你要求的新密钥生成失败（${newKeyError}），已先沿用现有密钥继续，不影响使用；需要的话稍后再重新生成。`;
+        userMessage += cfgWrite.written
+          ? ` 另外你要求的新密钥生成失败（${newKeyError}），已先沿用现有密钥继续，不影响使用；需要的话稍后再重新生成。`
+          : ` 另外你要求的新密钥生成也失败（${newKeyError}）；当前密钥也未安全落盘，无法继续检索。`;
       }
     } else if (String(r.msg || "").includes("验证码")) {
       userMessage = `验证码校验没通过（可能是输入有误或已过期）。请核对 ${maskPhone(a.phone)} 最新一条短信的 6 位验证码重新发我；需要我重新发送一条，直接说一声。`;
@@ -828,7 +854,9 @@ async function main() {
       userMessage = `开通服务暂时没连上（${r.msg || "网络波动"}），可以稍后再试，或用网页方式开通：${FALLBACK_REGISTER_URL}`;
     }
     console.log(JSON.stringify({
-      status: ok && Boolean(apiKeyToSave),
+      status: ok && Boolean(apiKeyToSave) && Boolean(cfgWrite.written),
+      registrationSucceeded: ok && Boolean(apiKeyToSave),
+      searchReady: Boolean(cfgWrite.written),
       msg: r.msg,
       url: data.url || null,
       existed: Boolean(data.existed),
@@ -837,9 +865,10 @@ async function main() {
       newKeyCreated,
       user_message: userMessage,
       envName: API_KEY_ENV,
-      // 防明文泄漏：注册成功且已持久化时不输出明文 apiKey，
-      // 只输出掩码与写入路径——业务脚本从配置文件直读，无需明文；仅写入失败时回退明文供临时注入。
-      apiKey: cfgWrite.written ? null : apiKeyToSave,
+      // 防明文泄漏（2026-11-09 审核）：任何情况下都不通过标准输出返回完整 Key，
+      // 只输出掩码与写入路径；业务脚本从 0600 配置文件直读。
+      apiKey: null,
+      apiKeyUnavailable: Boolean(apiKeyToSave) && !cfgWrite.written,
       apiKeyMasked: maskKey(apiKeyToSave),
       envWriteRequired: false,
       envWriteTarget: cfgWrite.path,
@@ -847,12 +876,14 @@ async function main() {
       envWriteError: cfgWrite.error,
       envWriteInstruction: cfgWrite.written
         ? `已写入 ${cfgWrite.path}；业务脚本直读该文件，无需重启宿主。`
-        : `未能写入 ${cfgWrite.path}，可运行 persist 命令补写，或由 Agent / 平台密钥配置将返回的 apiKey 写入环境变量 ${API_KEY_ENV}。`,
-      currentSessionInstruction: `已持久化时初始化会从配置文件直读 Key，无需手动注入；未持久化时用本次返回的 apiKey 临时注入环境变量 ${API_KEY_ENV}，不得向用户展示完整 Key。`,
+        : `未能写入 ${cfgWrite.path}（${cfgWrite.error || "未知原因"}）。请检查目录权限后重试；当前版本不再通过标准输出返回完整密钥。`,
+      currentSessionInstruction: cfgWrite.written
+        ? `已持久化，初始化会从配置文件直读 Key，无需手动注入。`
+        : `密钥未安全落盘，不得继续检索；请按 user_message 处理，不要向用户展示或自行保存完整 Key。`,
       newKeyError,
       fallbackRegisterUrl: FALLBACK_REGISTER_URL,
     }));
-    process.exit(ok && Boolean(apiKeyToSave) ? 0 : 1);
+    process.exit(ok && Boolean(apiKeyToSave) && cfgWrite.written ? 0 : 1);
   }
 
   if (cmd === "persist") {
@@ -873,7 +904,7 @@ async function main() {
       envWriteError: cfgWrite.error,
       envWriteInstruction: cfgWrite.written
         ? `已写入 ${cfgWrite.path}；脚本直读该文件，无需重启宿主。`
-        : `未能写入 ${cfgWrite.path}，请由 Agent 或平台密钥配置将返回的 apiKey 写入环境变量 ${API_KEY_ENV}。`,
+        : `未能写入 ${cfgWrite.path}，请检查目录权限后重试；不要在命令行或日志中传递明文 Key。`,
     }));
     process.exit(cfgWrite.written ? 0 : 1);
   }
