@@ -25,6 +25,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
+from source_display import source_identity
 
 
 DEFAULT_ENDPOINT = "https://open.dknowc.cn/open-api/maas/dependable/v2/search"
@@ -339,7 +340,7 @@ def _print_summary(body: Dict[str, Any], max_articles: int, max_paragraphs: int,
 
     for idx, article in enumerate(articles[:max_articles], start=1):
         title = article.get('文章标题') or '未命名材料'
-        source = article.get('数据源') or article.get('发布或实施机构') or ''
+        source, _, _, _ = source_identity(article)
         date = article.get('发布日期') or '接口未返回'
         url = article.get('源网址') or '接口未返回'
 
@@ -360,6 +361,50 @@ def _print_summary(body: Dict[str, Any], max_articles: int, max_paragraphs: int,
         print("｜".join(meta))
         print(f"相关段落：{_short(paragraph_text, paragraph_chars) or '接口未返回'}")
         print(f"原文：{url}")
+
+
+def _paragraphs(article: Dict[str, Any]) -> list:
+    paragraphs = article.get("段落") or article.get("paragraphs") or []
+    chunks = []
+    if isinstance(paragraphs, list):
+        for p in paragraphs:
+            if isinstance(p, dict):
+                chunks.append(str(p.get("内容") or p.get("text") or p.get("content") or ""))
+            else:
+                chunks.append(str(p or ""))
+    if not chunks:
+        chunks.append(str(article.get("内容") or article.get("content") or ""))
+    return [c for c in chunks if c.strip()]
+
+
+def _paragraph_text(article: Dict[str, Any]) -> str:
+    return "\n".join(_paragraphs(article)).strip()
+
+
+def _is_version_index_text(text: str) -> bool:
+    value = (text or "").strip()
+    if value.startswith("生效时间：") and "所属地域：" in value:
+        return True
+    if value.startswith("修订说明") and "相关文件有下面这些版本" in value:
+        return True
+    return False
+
+
+def _mark_citability(article: Dict[str, Any]) -> None:
+    """标记文章是否可引用（1.7.3）：版本索引/无正文材料禁止挂角标。"""
+    texts = _paragraphs(article)
+    substantive = any(not _is_version_index_text(t) for t in texts)
+    if substantive:
+        article["可引用"] = True
+        return
+    article["可引用"] = False
+    if str(article.get("文章类型") or "").strip() == "policy" or any(
+            _is_version_index_text(t) for t in texts):
+        article["材料性质"] = "版本索引"
+        article["不可引用原因"] = "policy 版本索引记录，仅含生效时间/修订说明，无正文段落"
+    else:
+        article["材料性质"] = "无正文"
+        article["不可引用原因"] = "接口未返回可引用的正文段落"
 
 
 def main() -> None:
@@ -448,6 +493,7 @@ def main() -> None:
                 # 联网路统一补 非官方来源 标记（dataAuthority 缺失/未开时兜底；渲染层按此+数据权威性双口径打徽标）
                 if args.search_channel == "webSearch":
                     _a["非官方来源"] = True
+                _mark_citability(_a)
         raw_json = json.dumps(body, ensure_ascii=False, indent=2)
         if args.output:
             output_path = resolve_output_json(args.output)

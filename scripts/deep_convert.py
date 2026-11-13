@@ -30,6 +30,62 @@ SEARCH_RESULTS_DIR = SCRIPT_DIR.parent / "official-docs" / "search-results"
 DEEP_CHANNEL = "深知深度搜索"
 
 
+def _paragraphs(article: dict) -> list:
+    """取文章段落文本列表（兼容 段落[].内容 / 内容 / content 等形态）。"""
+    paragraphs = article.get("段落") or article.get("paragraphs") or []
+    chunks = []
+    if isinstance(paragraphs, list):
+        for p in paragraphs:
+            if isinstance(p, dict):
+                chunks.append(str(p.get("内容") or p.get("text") or p.get("content") or ""))
+            else:
+                chunks.append(str(p or ""))
+    if not chunks:
+        chunks.append(str(article.get("内容") or article.get("content") or ""))
+    return [c for c in chunks if c.strip()]
+
+
+def _paragraph_text(article: dict) -> str:
+    return "\n".join(_paragraphs(article)).strip()
+
+
+def _is_version_index_text(text: str) -> bool:
+    """判断是否为政策库版本索引元数据段（不是法规正文）。
+
+    与渲染层 clean_paragraph_noise 的口径一致：段首为“生效时间：”且含“所属地域：”，
+    或仅有“修订说明：……相关文件有下面这些版本”的版本清单。
+    """
+    value = (text or "").strip()
+    if value.startswith("生效时间：") and "所属地域：" in value:
+        return True
+    if value.startswith("修订说明") and "相关文件有下面这些版本" in value:
+        return True
+    return False
+
+
+def _mark_citability(article: dict) -> None:
+    """给文章补“可引用”判断（1.7.3）。
+
+    政策库对多版本法规常返回 policy 版本索引记录：标题命中，但段落只有
+    生效时间/失效日期/修订说明，没有条文正文。此类记录只能当版本线索，
+    不能作为正文依据；在此显式标记，供 Agent 与渲染层统一识别。
+    """
+    texts = _paragraphs(article)
+    # 逐段判断：只要有一段不是版本索引元数据，就视为有正文（多段材料不能因首段是元数据而误杀）
+    substantive = any(not _is_version_index_text(t) for t in texts)
+    if substantive:
+        article["可引用"] = True
+        return
+    article["可引用"] = False
+    if str(article.get("文章类型") or "").strip() == "policy" or any(
+            _is_version_index_text(t) for t in texts):
+        article["材料性质"] = "版本索引"
+        article["不可引用原因"] = "policy 版本索引记录，仅含生效时间/修订说明，无正文段落"
+    else:
+        article["材料性质"] = "无正文"
+        article["不可引用原因"] = "接口未返回可引用的正文段落"
+
+
 def convert(payload: dict) -> dict:
     """摊平 v3 嵌套结构为通用检索文章列表（附分组与通道标记）。"""
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
@@ -51,6 +107,7 @@ def convert(payload: dict) -> dict:
             out["搜索条件"] = search_key
         if not out.get("检索通道"):
             out["检索通道"] = DEEP_CHANNEL
+        _mark_citability(out)
         articles.append(out)
 
     for search in searches:

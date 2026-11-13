@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from source_display import source_identity
 
 
 DEFAULT_ENDPOINT = "https://open.dknowc.cn/api/services/deep-query/v3"
@@ -256,7 +257,7 @@ def _print_summary(body: Dict[str, Any], show_materials: int) -> None:
         print(f"\n重点材料（前 {min(show_materials, len(articles))} 篇）")
         for idx, item in enumerate(articles[:show_materials], start=1):
             title = item.get("文章标题") or "未命名材料"
-            agency = item.get("数据源") or ""
+            agency, _, _, _ = source_identity(item)
             date = item.get("发布日期") or ""
             area = item.get("办理地域") or ""
             url = item.get("源网址") or ""

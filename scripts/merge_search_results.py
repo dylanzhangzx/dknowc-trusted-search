@@ -180,6 +180,57 @@ def _merge_article(target: Dict[str, Any], incoming: Dict[str, Any]) -> None:
             target[all_key] = vals
 
 
+def _paragraphs(article: Dict[str, Any]) -> list:
+    paragraphs = article.get("段落") or article.get("paragraphs") or []
+    chunks = []
+    if isinstance(paragraphs, list):
+        for p in paragraphs:
+            if isinstance(p, dict):
+                chunks.append(str(p.get("内容") or p.get("text") or p.get("content") or ""))
+            else:
+                chunks.append(str(p or ""))
+    if not chunks:
+        chunks.append(str(article.get("内容") or article.get("content") or ""))
+    return [c for c in chunks if c.strip()]
+
+
+def _paragraph_text(article: Dict[str, Any]) -> str:
+    return "\n".join(_paragraphs(article)).strip()
+
+
+def _is_version_index_text(text: str) -> bool:
+    value = (text or "").strip()
+    if value.startswith("生效时间：") and "所属地域：" in value:
+        return True
+    if value.startswith("修订说明") and "相关文件有下面这些版本" in value:
+        return True
+    return False
+
+
+def _apply_citability(article: Dict[str, Any]) -> None:
+    """按最终段落重算“可引用”（1.7.3）。
+
+    政策库多版本 policy 记录只有版本索引元数据、没有正文，不能作为正文依据。
+    在 merge 末尾统一重算，避免同材料合并后沿用旧的不可引用标记。
+    """
+    texts = _paragraphs(article)
+    substantive = any(not _is_version_index_text(t) for t in texts)
+    if substantive:
+        article["可引用"] = True
+        article.pop("不可引用原因", None)
+        if article.get("材料性质") in ("版本索引", "无正文"):
+            article.pop("材料性质", None)
+        return
+    article["可引用"] = False
+    if str(article.get("文章类型") or "").strip() == "policy" or any(
+            _is_version_index_text(t) for t in texts):
+        article["材料性质"] = "版本索引"
+        article["不可引用原因"] = "policy 版本索引记录，仅含生效时间/修订说明，无正文段落"
+    else:
+        article["材料性质"] = "无正文"
+        article["不可引用原因"] = "接口未返回可引用的正文段落"
+
+
 def _to_article(item: Dict[str, Any], default_key: str = "") -> Dict[str, Any]:
     """把深度产物条目/可信产物条目归一为检索文章字段（渲染器 source_from_article 契约）。"""
     article = {
@@ -196,6 +247,13 @@ def _to_article(item: Dict[str, Any], default_key: str = "") -> Dict[str, Any]:
         if snap:
             article["screenShotPath"] = snap
             break
+    # 发文机构透传（1.7.3）：V2/V3 在文章级返回「发布或实施机构」（政策路实测覆盖），
+    # 渲染器 source_display 只认这三个字段。此前白名单漏掉它们，导致接口明明返回了机构、
+    # 来源卡仍显示「发文机构待补」；数据源仍不进入展示链路。
+    for issuer_key in ("发布或实施机构", "发布机关", "unit"):
+        issuer_value = item.get(issuer_key)
+        if issuer_value not in (None, "", [], {}):
+            article[issuer_key] = issuer_value
     # 文号键链（2026-10-23）：「发文字号」是 V2 可信路文章级实际键名（policy 路实测返回，
     # 如 商办消费函〔2021〕58号）——缺它则 V2 文号全靠 policyFiles 本地匹配兜底（writtenText
     # 偶发为空，兜底不稳）；`writtenText` 为深搜接口 10-23 新增文章级键（标题命中 policyFiles
@@ -213,6 +271,16 @@ def _to_article(item: Dict[str, Any], default_key: str = "") -> Dict[str, Any]:
         article["待核验"] = True
     if _first_value(item, "数据权威性", "authority"):
         article["数据权威性"] = _first_value(item, "数据权威性", "authority")
+    # 可引用性（1.7.3）：deep_convert 已标记的显式透传；历史 JSON/其他渠道缺字段时按段落重算
+    if item.get("可引用") is False:
+        article["可引用"] = False
+    if item.get("材料性质"):
+        article["材料性质"] = item.get("材料性质")
+    if item.get("不可引用原因"):
+        article["不可引用原因"] = item.get("不可引用原因")
+    if "文章类型" in item:
+        article["文章类型"] = item.get("文章类型")
+    _apply_citability(article)
     key = _first_value(item, "搜索条件", "search_key", "deep_group") or default_key
     if key:
         article["搜索条件"] = key
@@ -490,6 +558,11 @@ def main() -> None:
                     drop_set.add(a)          # a 才是污染段
         if drop_set:
             article["段落"] = [p for i, p in enumerate(paras) if i not in drop_set]
+
+    # 可引用性按合并后的最终段落重算（1.7.3）：同材料合并可能补入正文，
+    # 不能沿用合并前的“版本索引/无正文”标记。
+    for _art in merged:
+        _apply_citability(_art)
 
     # 内部路次标记与段落贡献记录不进入产物（去重/统计结束后统一剥离）
     for _art in merged:

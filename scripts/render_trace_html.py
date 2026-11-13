@@ -34,6 +34,7 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from source_display import source_identity
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import chart_embed  # noqa: E402  图表渲染共享模块（1.4.0，与可视化报告共用）
@@ -383,29 +384,27 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
     if explicit_id:
         match = re.search(r"\d+", explicit_id)
         explicit_id = match.group(0) if match else ""
+    title = first_str(
+        item.get("文章标题"),
+        item.get("material_name"),
+        item.get("材料名称"),
+        item.get("title"),
+        item.get("标题"),
+        item.get("name"),
+        vo.get("showTitle"),
+        vo.get("title"),
+        "未命名来源文章",
+    )
+    # 统一走 source_display 口径，避免渲染层另抄一份逻辑。
+    agency, data_source, issuer, is_policy = source_identity(item, vo)
+
     source = {
         "id": explicit_id or str(index),
-        "title": first_str(
-            item.get("文章标题"),
-            item.get("material_name"),
-            item.get("材料名称"),
-            item.get("title"),
-            item.get("标题"),
-            item.get("name"),
-            vo.get("showTitle"),
-            vo.get("title"),
-            "未命名来源文章",
-        ),
-        "agency": first_str(
-            item.get("unit") if not isinstance(item.get("unit"), list) else "、".join(str(x) for x in item.get("unit")[:3]),
-            item.get("sourceElement"),
-            item.get("数据源"),
-            item.get("发布或实施机构"),
-            item.get("发布机关"),
-            item.get("来源"),
-            vo.get("typeName"),
-            vo.get("sourceName"),
-        ),
+        "title": title,
+        "agency": agency,
+        "data_source": data_source,
+        "issuer": issuer,
+        "is_policy": is_policy,
         "date": first_str(item.get("发布日期"), item.get("date"), item.get("发布时间"), item.get("createDate"), vo.get("dateTime"), vo.get("createDate")),
         "url": first_str(item.get("sourceUrl"), item.get("source_url"), item.get("源网址"), item.get("原文链接"), item.get("url"), item.get("原文"), vo.get("sourceUrl"), vo.get("url")),
         "policy_url": first_str(item.get("policyUrl"), item.get("policy_url"), vo.get("policyUrl")),
@@ -444,6 +443,11 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
     source["unofficial"] = bool(item.get("非官方来源")) or str(
         item.get("数据权威性") or item.get("authority") or "").strip() in ("非权威", "non-authoritative")
     source["pending"] = bool(item.get("待核验") or item.get("pending"))
+    # 可引用性（1.7.3）：policy 版本索引/无正文材料不得作为正文依据。
+    # 缺字段时按摘录是否有内容兜底（历史 JSON 兼容）。
+    source["citable"] = item.get("可引用") is not False
+    source["material_kind"] = first_str(item.get("材料性质"))
+    source["uncitable_reason"] = first_str(item.get("不可引用原因"))
     source["used"] = item.get("已引用", item.get("used", True))
     if not isinstance(source["used"], bool):
         source["used"] = True
@@ -458,8 +462,8 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
     source["type_css"] = css
     live_url = bool(source["url"] and source["url"] != "接口未返回")
     source["has_link"] = live_url or bool(source["policy_url"]) or bool(source["snapshot"])
-    # 核验状态只看摘录可比对；原文链接死活与快照有无是回看通道问题，不影响核验结论
-    source["verified"] = bool(source["excerpt"])
+    # 核验状态只看摘录可比对且材料可引用；原文链接死活与快照有无是回看通道问题，不影响核验结论
+    source["verified"] = bool(source["excerpt"]) and source["citable"]
     return source
 
 
@@ -710,7 +714,11 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
     cited_sources = [s for s in sources if s.get("used", True)]
     missing_links = [s["title"] for s in cited_sources if not s.get("has_link")]
     missing_excerpts = [s["title"] for s in cited_sources if not (s.get("excerpt") or "").strip()]
-    trace_passed = len(cited_sources) - len(missing_excerpts)
+    # 1.7.3：policy 版本索引/无正文材料显式标为不可引用，即使有摘录也不得作为正文依据
+    uncitable = [s["title"] for s in cited_sources if s.get("citable") is False]
+    bad_ids = {s["id"] for s in cited_sources
+               if not (s.get("excerpt") or "").strip() or s.get("citable") is False}
+    trace_passed = len(cited_sources) - len(bad_ids)
 
     # ② 引用绑定：正文角标与来源卡一一对应（按角标出现次数计，与用户在正文中数到的一致）
     cited = citation_ids(answer)
@@ -758,8 +766,16 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
     # 政策效力：无法自动判定现行效力，列出建议人工复核
     policy_count = coverage.get("policy", 0)
 
-    trace_ok = cited_sources and not missing_excerpts
+    trace_ok = cited_sources and not bad_ids
     binding_ok = (not unbound) and not no_citation
+    # 1.7.3：存在无摘录/不可引用正文依据时，交付前检查不能仍显示全绿；
+    # 追加一条真实计算出的“依据可用性”失败项，避免“5/5 通过”与核验失败并存。
+    if bad_ids and self_check["status"] != "missing":
+        self_check["items"]["依据可用性"] = (
+            "fail", f"{len(bad_ids)} 条正文依据无摘录或为不可引用材料")
+        self_check["failed"] = sum(1 for status, _ in self_check["items"].values() if status == "fail")
+        self_check["total"] = len(self_check["items"])
+        self_check["status"] = "fail"
     # 自检显式"未通过"纳为报告级否决项：不能自检失败还顶部打绿章。
     self_check_ok = self_check["status"] != "fail"
     overall_passed = bool(trace_ok and binding_ok and self_check_ok)
@@ -771,6 +787,8 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
         reasons.append("正文里没有来源角标，对不上来源文章")
     if unbound:
         reasons.append(f"有 {len(unbound)} 处角标找不到对应来源文章")
+    if uncitable:
+        reasons.append(f"有 {len(uncitable)} 条正文依据为不可引用材料（版本索引/无正文）")
     if self_check["status"] == "fail":
         reasons.append("交付前检查有没过的项")
     if missing_links:
@@ -789,7 +807,8 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
             "reasons": reasons,
         },
         "traceability": {"total": len(cited_sources), "passed": trace_passed,
-                         "missing_links": missing_links, "missing_excerpts": missing_excerpts},
+                         "missing_links": missing_links, "missing_excerpts": missing_excerpts,
+                         "uncitable": uncitable},
         "binding": {"total": len(all_marks), "bound": len(all_marks) - len(unbound), "unbound": unbound_ids, "no_citation": no_citation},
         "freshness": freshness,
         "coverage": coverage,
@@ -1266,6 +1285,8 @@ def render_verify_panel(v: Dict[str, Any]) -> str:
                    f'<span class="d">摘录可比对，其中 {n_no_link} 条没有原文链接或存档快照、无法回看</span></div>')
     else:
         detail = f'待补摘录 {len(tr.get("missing_excerpts") or [])} 条'
+        if tr.get("uncitable"):
+            detail += f'；不可引用 {len(tr["uncitable"])} 条'
         if n_no_link:
             detail += f'；{n_no_link} 条无原文链接或快照'
         tr_html = (f'<div class="vi"><span class="s warn">◐ 依据溯源 {tr["passed"]}/{tr["total"]}</span>'
@@ -1430,8 +1451,20 @@ def render_section_cards(sections: List[Dict[str, Any]], sources: List[Dict[str,
             badge_html = ""
             if sec_cites:
                 unbound = sum(1 for cid in sec_cites if cid not in source_ids)
-                state = "bad" if unbound else ""
-                text = f"本章引用 {len(sec_cites)} 处" + (f" · {unbound} 处未绑定" if unbound else " · 已核验")
+                # 1.7.3：章节“已核验”必须覆盖该章引用的全部材料；存在无摘录/不可引用
+                # 材料时改为黄色待补提示，不能只校验角标绑定。
+                _sec_sources = [s for s in sources if s.get("id") in sec_cites]
+                _bad = [s for s in _sec_sources
+                        if not (s.get("excerpt") or "").strip() or s.get("citable") is False]
+                if unbound:
+                    state = "bad"
+                    text = f"本章引用 {len(sec_cites)} 处 · {unbound} 处未绑定"
+                elif _bad:
+                    state = "warn"
+                    text = f"本章引用 {len(sec_cites)} 处 · {len(_bad)} 条待补摘录"
+                else:
+                    state = ""
+                    text = f"本章引用 {len(sec_cites)} 处 · 已核验"
                 badge_html = f'<span class="sec-badge {state}">{esc(text)}</span>'
             parts.append(f'<section class="chapter" id="{id_prefix}-{sec_idx}">'
                          f'<header class="ch-head"><h2>{esc(chapter_title)}</h2>{badge_html}</header>')
@@ -1513,8 +1546,12 @@ def render_source_card(source: Dict[str, str], for_print: bool = False) -> str:
     if not source.get("used", True):
         # 未引用召回材料：不标"已核验"（未进入正文核验流程），只标可否查看
         vk = ('<span class="sc-vk" style="color:var(--muted)">可查看全文</span>' if source.get("has_link")
-              else '<span class="sc-vk warn">待补链接</span>')
+              else '<span class="sc-vk" style="color:var(--muted)" title="本条未返回原文链接，可查看接口返回的原文摘录">可查看摘录</span>')
         note_html = ""
+    elif source.get("citable") is False:
+        reason = source.get("uncitable_reason") or "版本索引记录，无正文，不可引用"
+        vk = f'<span class="sc-vk warn" title="{esc(reason)}">◐ 不可引用</span>'
+        note_html = f'<div class="sc-vnote">{esc(short(reason, 90))}</div>'
     elif source.get("verified"):
         note = source.get("verify_note") or "摘录可比对，原文或存档快照可回看"
         vk = f'<span class="sc-vk ok" title="{esc(note)}">✓ 已核验</span>'
@@ -1524,7 +1561,7 @@ def render_source_card(source: Dict[str, str], for_print: bool = False) -> str:
         vk = f'<span class="sc-vk warn">◐ {reason}</span>'
         note_html = ""
     links = render_source_links(source.get("url"), source.get("policy_url", ""), source.get("snapshot", ""))
-    # 关键性行：有文号（接口 policyFiles 匹配）时"文号 · 数据源 · 日期"，否则"数据源 · 日期"。
+    # 关键性行：有文号（接口 policyFiles 匹配）时"文号 · 发文机构/来源 · 日期"，否则"发文机构/来源 · 日期"。
     # 文号必须是标准格式——政府公文"〔年份〕序号"（杭政函〔2022〕81号）、公告/令类"第X号"
     # （财政部税务总局公告2023年第19号、主席令第三十五号、国务院令第765号，含汉字数字）；
     # 描述性文字（"XX印发"类自造描述）不显示，当无文号处理。
@@ -1907,6 +1944,7 @@ a{color:var(--brand)}
 .ch-head::after{content:"";flex-basis:110px;height:1px;background:linear-gradient(90deg,#e9dff9,transparent);order:3;flex-grow:0;flex-shrink:0}
 .ch-head .sec-badge{order:4;flex:none;font-size:11.5px;color:var(--ok);background:var(--policy-soft);border-radius:6px;padding:2px 9px;font-weight:700}
 .ch-head .sec-badge.bad{color:var(--danger);background:#fdecec}
+.ch-head .sec-badge.warn{color:var(--warn);background:#fff6e5}
 @media(min-width:1000px){.ch-head::after{flex-basis:200px}}
 .lead{font-size:15.5px;line-height:1.95;color:var(--body-c);margin:14px 0;padding:0 2px;word-break:break-word}
 .para{font-size:15.5px;line-height:1.95;color:var(--body-c);margin:14px 0;padding:0 2px;word-break:break-word}

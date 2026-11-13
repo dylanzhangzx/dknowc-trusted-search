@@ -21,6 +21,7 @@ RESULTS = SKILL / "official-docs" / "search-results"
 sys.path.insert(0, str(SCRIPTS))
 
 import websearch_convert as wc  # noqa: E402
+import deep_convert as dc  # noqa: E402
 import render_trace_html as rt  # noqa: E402
 
 PASSED = 0
@@ -153,6 +154,31 @@ def main():
         code, out = run_cli([str(empty), "-o", "/tmp/outside.json"])
         check("输出越界 exit 2", code == 2, out)
 
+    print("== 1.7.3 可引用性标记 ==")
+    _dc_payload = {"data": {"searches": [{"query": "广州住房公积金管理条例", "areas": ["广州"], "result": [
+        {"文章标题": "住房公积金管理条例", "文章类型": "policy",
+         "数据源": "郑州市人民政府门户网站",
+         "源网址": "https://www.gdqy.gov.cn/gjjzx/gkmlpt/content/1/1888/post_1888831.html",
+         "段落": [{"id": 1, "内容": "生效时间：2019年03月24日\n所属地域：中国\n"
+                                  "发文字号：中华人民共和国国务院令第262号\n"
+                                  "修订说明:【住房公积金管理条例】相关文件有下面这些版本：……"}]},
+        {"文章标题": "正常政策正文", "文章类型": "policy",
+         "段落": [{"id": 1, "内容": "第一条 为规范住房公积金管理，结合本市实际，制定本办法。"}]},
+        {"文章标题": "元数据加正文", "文章类型": "policy",
+         "段落": [{"id": 1, "内容": "生效时间：2019年03月24日\n所属地域：中国\n修订说明:……"},
+                  {"id": 2, "内容": "第一条 为规范住房公积金管理，结合本市实际，制定本办法。"}]},
+    ]}]}}
+    _dc_out = dc.convert(_dc_payload)["content"]["data"]["检索文章"]
+    _meta = next(a for a in _dc_out if a["文章标题"] == "住房公积金管理条例")
+    _normal = next(a for a in _dc_out if a["文章标题"] == "正常政策正文")
+    _mixed = next(a for a in _dc_out if a["文章标题"] == "元数据加正文")
+    check("版本索引材料标记为不可引用",
+          _meta.get("可引用") is False and _meta.get("材料性质") == "版本索引", str(_meta))
+    check("版本索引材料带不可引用原因",
+          "无正文段落" in (_meta.get("不可引用原因") or ""), str(_meta))
+    check("正常正文材料标记为可引用", _normal.get("可引用") is True, str(_normal))
+    check("元数据+正文多段材料仍可引用", _mixed.get("可引用") is True, str(_mixed))
+
     print("== merge 联调：权威优先 + 待核验 ==")
     def write(name, data):
         (RESULTS / name).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
@@ -178,6 +204,13 @@ def main():
             "检索通道": "宿主 WebSearch", "段落": [{"id": 1, "内容": "外部补充段落。"}]}], "policyFiles": []}}}
         write("test_ws_official.json", official)
         write("test_ws_external.json", external)
+        write("test_ws_dc_citable.json", dc.convert(_dc_payload))
+        _d_citable = merged([("test_ws_dc_citable.json", "广州·广州住房公积金管理条例")])
+        _a_citable = next(a for a in _d_citable["content"]["data"]["检索文章"]
+                          if a["文章标题"] == "住房公积金管理条例")
+        check("merge 保留版本索引不可引用标记",
+              _a_citable.get("可引用") is False and _a_citable.get("材料性质") == "版本索引",
+              str(_a_citable))
         d = merged([("test_ws_official.json", "库内"), ("test_ws_external.json", "公开资料补充")])
         arts = d["content"]["data"]["检索文章"]
         a = arts[0]
@@ -535,6 +568,36 @@ def main():
         check("库内无权威字段渲染后无正文提示条", "本页部分材料来自公开网络" not in html2)
         check("库内无权威字段渲染后无非官方徽标", "非官方来源" not in html2)
 
+        # 1.7.3：policy 版本索引（可引用=false）被引用时，章节与交付前检查必须联动
+        uncitable_merged = {"content": {"data": {"检索文章": [{
+            "编号": 1, "文章标题": "住房公积金管理条例",
+            "源网址": "https://www.gdqy.gov.cn/gjjzx/gkmlpt/content/1/1888/post_1888831.html",
+            "数据源": "郑州市人民政府门户网站", "检索通道": "深知深度搜索",
+            "可引用": False, "材料性质": "版本索引",
+            "不可引用原因": "policy 版本索引记录，仅含生效时间/修订说明，无正文段落",
+            "段落": [{"id": 1, "内容": "生效时间：2019年03月24日\n所属地域：中国\n"
+                                      "修订说明:【住房公积金管理条例】相关文件有下面这些版本：……"}],
+        }], "policyFiles": []}}}
+        write("test_ws_render_uncitable.json", uncitable_merged)
+        (RESULTS / "test_ws_uncitable_answer.txt").write_text(
+            "# 测试\n\n## 一、现行依据\n\n测试结论[1]。\n", encoding="utf-8")
+        out3 = SKILL / "official-docs" / "output" / "test_ws_render_uncitable.html"
+        out3.unlink(missing_ok=True)
+        proc = subprocess.run([
+            sys.executable, str(SCRIPTS / "render_trace_html.py"), "test_ws_render_uncitable.json",
+            "--answer-file", "test_ws_uncitable_answer.txt",
+            "--self-check-file", "test_ws_render_selfcheck.json",
+            "--question", "测试", "--output", "test_ws_render_uncitable.html",
+        ], capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stdout + proc.stderr)
+        html3 = out3.read_text(encoding="utf-8")
+        check("不可引用材料章节不标已核验",
+              "本章引用 1 处 · 1 条待补摘录" in html3 and "本章引用 1 处 · 已核验" not in html3)
+        check("不可引用材料卡片明确标注", "不可引用" in html3)
+        check("交付前检查联动失败", "交付前检查 5/6" in html3 and "依据可用性" in html3)
+        check("不可引用材料整体核验失败", "核验未完全通过" in html3)
+
         # 五验待确认项：同一分组标签对应多条 --input 时，过程条增量必须汇总
         stats_same_label = rt.compute_process_stats(
             [{"search_key": "补充检索", "channel": "深知可信搜索", "used": True},
@@ -550,6 +613,7 @@ def main():
             p.unlink(missing_ok=True)
         (SKILL / "official-docs" / "output" / "test_ws_render.html").unlink(missing_ok=True)
         (SKILL / "official-docs" / "output" / "test_ws_render_official.html").unlink(missing_ok=True)
+        (SKILL / "official-docs" / "output" / "test_ws_render_uncitable.html").unlink(missing_ok=True)
 
     print(f"\n结果：{PASSED} passed, {FAILED} failed")
     return 0 if FAILED == 0 else 1
