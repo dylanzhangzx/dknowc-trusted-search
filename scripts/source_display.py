@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """来源展示口径：政策材料显示发文机构，非政策也不显示数据源网站名。
 
-1.7.3 实际链路为可信搜索 V2 + 深度搜索 V3。展示层一律不出现“数据源”网站名：
+本包链路为可信搜索 V2 + 深度搜索 V3。展示层一律不出现“数据源”网站名：
 政策只显示接口返回的发文机构，缺失显示“发文机构待补”；非政策显示发文机构，
-缺失显示“公开网站”。不从标题推导发文机构。V1 不在 1.7.3 范围。
+缺失显示“公开网站”。不从标题推导发文机构。
 """
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def source_identity(item: Dict[str, Any], vo: Optional[Dict[str, Any]] = None) -
             article_type = value.strip()
             break
     is_policy = article_type.strip().lower() == "policy" or article_type.strip() == "政策"
-    # 展示层一律不出现“数据源”网站名（Dylan 2026-11-13 确认）。
+    # 展示层一律不出现“数据源”网站名（项目口径）。
     # 只使用接口返回的发文机构，不从标题推导。
     agency = issuer or ("发文机构待补" if is_policy else "公开网站")
     return agency, data_source, issuer, is_policy

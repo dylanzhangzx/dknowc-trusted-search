@@ -430,8 +430,15 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
     first_chain = segments[0]["chain"][1:] if segments else []
     source["doc_section"] = " › ".join(first_chain)
     source["chain_full"] = " › ".join(segments[0]["chain"]) if segments else ""
-    # 发文字号（接口 policyFiles.writtenText，本地标题匹配）
-    source["doc_number"] = first_str(item.get("文号"), item.get("doc_number"))
+    # 发文字号：单路原始 JSON 与 merge 归一后的 JSON 都要兼容。
+    # - 可信 V2 文章级字段为「发文字号」；深搜 V3 文章级字段为 writtenText；
+    # - merge 会把两者归一为「文号」，但单路直接渲染不经过 merge，必须在本层兜住。
+    source["doc_number"] = first_str(
+        item.get("文号"),
+        item.get("发文字号"),
+        item.get("writtenText"),
+        item.get("doc_number"),
+    )
     # 所属搜索条件（多路检索分组）与引用状态（未引用=接口召回但正文未采用）
     # 分组标签面向用户：过滤「可信联网/外部联网/阶段X」等内部实现词
     source["search_key"] = user_facing_text(first_str(item.get("搜索条件"), item.get("search_key")))

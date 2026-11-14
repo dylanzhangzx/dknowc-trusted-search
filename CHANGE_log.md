@@ -1,10 +1,18 @@
 # 更新日志
 
-## 1.7.3-skills-sh - 2026-11-13
+## 1.7.4-skills-sh - 2026-11-14
 
-- 同步 SkillHub 母版 `1.7.3` 同号修正（真实报告复核后重封版）：①`merge_search_results.py` 的 `_to_article` 透传 `发布或实施机构`/`发布机关`/`unit`（修复来源卡全显示「发文机构待补」）；②`source_display.py` 的 `clean_issuer` 清理机构串内部 `##`；③未引用材料的「待补链接」黄色徽标改为中性「可查看摘录」。
-- 渠道化沿用既有规则：skills.sh注册渠道码 `8C8D411C-6A46-4E99-887D-87D9A1329930`，slug `dknowc-trusted-search-skills-sh`，attribution channel `skills-sh`；脚本层 skillhub 清零；register 不传 type、`source="agent"` 保留。
+- 同步母版 `1.7.4`（注释整改后最终版）：单路渲染文号修复——`render_trace_html.py` 文号字段链改为 文号 → 发文字号 → writtenText → doc_number；新增 `tests/test_doc_number_display.py`（7 项）。
+- 渠道化沿用既有规则：skills.sh注册渠道码 `8C8D411C-6A46-4E99-887D-87D9A1329930`，slug `dknowc-trusted-search-skills-sh`，attribution channel `skills-sh`；脚本层 skillhub 清零；包内无人名与内部日期注释。
 
+
+## [1.7.4] - 2026-11-14（单路直接渲染文号缺失修复）
+
+> **背景（徐剑军 2026-11-14 真实测试）**：Codex Windows 官方安装包 1.7.3，查询“国务院关于印发推动大规模设备更新和消费品以旧换新行动方案的通知，其发文字号和发布日期是什么”。同一份真实响应，单路直接渲染的知识专库 16/16 篇带文号材料卡片漏显文号；先经 merge 再渲染的 16/16 篇正常。接口原文 `发文字号` 均非空，`policyFiles.writtenText` 全为空。
+> 1. **渲染层字段兼容**：`render_trace_html.py` 的 `source_from_article` 文号字段链补 `发文字号`（可信 V2 文章级实际字段）与 `writtenText`（深搜 V3 文章级实际字段），保留 `文号`/`doc_number` 兼容。单路原始 JSON 直接渲染不再依赖 merge 归一。
+> 2. **回归测试**：新增 `tests/test_doc_number_display.py` 7/7，覆盖 V2 单路 `发文字号`、深搜单路 `writtenText`、merge 后 `文号`、`文号` 优先级、`policyFiles.writtenText` 兜底；用徐总同一份原始响应重渲染，知识专库 16/16 篇文号恢复（打印版重复计入后 32/36 条 meta 带文号）。
+> 3. **验证**：`test_doc_number_display.py` 7/7、`test_issuer_display.py` 20/20、`test_websearch_convert.py` 90/90、`test_register_key_persist.py` 10/10；py_compile / check_release 通过。版本 1.7.4，包 20 文件。
+> 4. **审核整改（同号 1.7.4）**：skill审核 1.7.4 报告“有条件通过”，阻塞项为 `scripts/source_display.py:56` 注释含产品负责人姓名与内部确认日期；已改为中性“项目口径”，全包复扫无姓名/内部日期，重新打包。最终包 20 文件 / 558,433 B / SHA-256 18209cbb42dbb38f6d0c83c8eb525fccd77fdcf0bda601be151a511d07d15527；skill审核复审结论“通过（仅限 skillhub 1.7.4 包）”。
 
 ## [1.7.3] - 2026-11-13（可引用性判定：版本索引/无正文材料禁止挂角标）
 
