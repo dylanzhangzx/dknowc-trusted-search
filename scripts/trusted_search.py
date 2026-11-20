@@ -26,11 +26,10 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 from source_display import source_identity
+from run_paths import RunPathError, resolve_output_path, resolve_run_dir
 
 
 DEFAULT_ENDPOINT = "https://open.dknowc.cn/open-api/maas/dependable/v2/search"
-SKILL_ROOT = Path(__file__).resolve().parent.parent
-SEARCH_RESULTS_DIR = SKILL_ROOT / "official-docs" / "search-results"
 
 # V2 参数定档（1.6.0；对齐公文写作 3.9.0 三组受控实测：4/18000 双主题相关率最高、边际新增质量最好）
 DEFAULT_SEARCH_TYPE = "policy"       # 政策依据主路；办事/流程类补 govSite 路（各自单值，禁止混传）
@@ -95,23 +94,11 @@ def _fail_request(stage: str, reason: str, status_code=None, errmsg=None):
 
 
 
-def resolve_output_json(output_path: str) -> Path:
-    """把搜索结果 JSON 落到 official-docs/search-results/，阻断路径遍历。"""
-    raw_path = Path(output_path).expanduser()
-    if raw_path.is_absolute():
-        resolved = raw_path.resolve()
-    elif raw_path.parent == Path("."):
-        resolved = (SEARCH_RESULTS_DIR / raw_path.name).resolve()
-    else:
-        resolved = (SKILL_ROOT / raw_path).resolve()
-
-    if resolved.suffix.lower() != ".json":
-        resolved = resolved.with_suffix(".json")
-    try:
-        resolved.relative_to(SEARCH_RESULTS_DIR.resolve())
-    except ValueError:
-        raise ValueError(f"输出文件必须位于 official-docs/search-results/ 内: {output_path}")
-    return resolved
+def resolve_output_json(output_path: str, run_dir: Optional[Path] = None) -> Path:
+    """搜索结果只写会话工作区的 run 目录；拒绝写回 Skill 安装目录。"""
+    if not Path(output_path).expanduser().is_absolute() and run_dir is None:
+        raise RunPathError("相对 --output 必须同时用 --run 指定运行目录")
+    return resolve_output_path(output_path, run_dir, {".json"}, ".json", "trusted_search.json")
 
 
 def _pick(*values: Optional[str]) -> str:
@@ -442,9 +429,16 @@ def main() -> None:
     parser.add_argument("--show-payload", action="store_true", help="打印请求参数")
     parser.add_argument("--dry-run", action="store_true", help="只打印请求参数，不发起请求")
     parser.add_argument("--json-only", action="store_true", help="仅输出原始 JSON")
-    parser.add_argument("--output", "-o", help="搜索结果 JSON 文件名，写入 official-docs/search-results/（配合 --json-only 使用）")
+    parser.add_argument("--run", help="本次运行的独立目录（必须在 Skill 安装目录之外；重复运行自动另建）")
+    parser.add_argument("--output", "-o", help="搜索结果 JSON 文件名；相对名落在 --run 目录，配合 --json-only 使用")
     parser.add_argument("--timeout", type=int, default=60, help="请求超时秒数")
     args = parser.parse_args()
+
+    try:
+        run_dir = resolve_run_dir(args.run) if args.run else None
+    except RunPathError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        sys.exit(2)
 
     args.search_type = _validate_search_type(args.search_type)
     endpoint = _pick(
@@ -496,12 +490,14 @@ def main() -> None:
                 _mark_citability(_a)
         raw_json = json.dumps(body, ensure_ascii=False, indent=2)
         if args.output:
-            output_path = resolve_output_json(args.output)
+            try:
+                output_path = resolve_output_json(args.output, run_dir)
+            except RunPathError as exc:
+                print(f"错误：{exc}", file=sys.stderr)
+                sys.exit(2)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(raw_json, encoding="utf-8")
-            # 绝对路径输出（2026-09-28 修复）：只打相对路径时 Agent 会到工作区 cwd 下找、
-            # 找不到就全盘 find（实测触发宿主 ~/.ssh 读取询问）——落盘位置在 skill 目录，直接给绝对路径
-            print(f"已保存搜索结果 JSON（位于 skill 工作区，绝对路径）：{output_path}")
+            print(f"已保存搜索结果 JSON（会话运行目录，绝对路径）：{output_path}")
         else:
             print(raw_json)
         return

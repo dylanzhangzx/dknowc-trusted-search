@@ -24,8 +24,7 @@ import json
 import sys
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-SEARCH_RESULTS_DIR = SCRIPT_DIR.parent / "official-docs" / "search-results"
+from run_paths import RunPathError, resolve_input_path, resolve_output_path, resolve_run_dir
 
 DEEP_CHANNEL = "深知深度搜索"
 
@@ -111,9 +110,12 @@ def convert(payload: dict) -> dict:
         articles.append(out)
 
     for search in searches:
-        areas = "、".join(str(a) for a in (search.get("areas") or []))
+        area_list = [str(a).strip() for a in (search.get("areas") or []) if str(a).strip()]
+        areas = "、".join(area_list)
         query = str(search.get("query") or "").strip()
-        label = f"{areas}·{query[:14]}" if areas else query[:18]
+        # 地域已写进 query 时不再重复前缀（原会显示成"成都·成都 人才落户…"）
+        area_in_query = bool(area_list) and all(a in query for a in area_list)
+        label = f"{areas}·{query[:14]}" if areas and not area_in_query else query[:18]
         for article in search.get("result") or []:
             _add(article, label)
     for article in data.get("common_articles") or []:
@@ -131,36 +133,35 @@ def convert(payload: dict) -> dict:
     }
 
 
-def resolve_output(name: str) -> Path:
-    path = Path(name).expanduser()
-    if not path.is_absolute():
-        path = (SEARCH_RESULTS_DIR / path.name).resolve()
-    try:
-        path.relative_to(SEARCH_RESULTS_DIR.resolve())
-    except ValueError:
-        raise SystemExit(f"错误：输出文件必须位于 {SEARCH_RESULTS_DIR}") from None
-    return path
+def resolve_output(name: str, run_dir: Path | None) -> Path:
+    if not Path(name).expanduser().is_absolute() and run_dir is None:
+        raise RunPathError("相对 -o/--output 必须同时用 --run 指定运行目录")
+    return resolve_output_path(name, run_dir, {".json"}, ".json", "deep_converted.json")
 
 
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="深度搜索产物转换（v3 原始 → 可信同构通用形态）")
-    parser.add_argument("input", help="deep_query.py --json-only 的落盘 JSON（official-docs/search-results/ 内文件名或绝对路径）")
-    parser.add_argument("-o", "--output", default="deep_converted.json", help="输出文件名（official-docs/search-results/ 内），默认 deep_converted.json")
+    parser.add_argument("input", help="deep_query.py --json-only 的落盘 JSON（run 目录内文件名或绝对路径）")
+    parser.add_argument("--run", help="本次运行的独立目录（必须在 Skill 安装目录之外）")
+    parser.add_argument("-o", "--output", default="deep_converted.json", help="输出文件名；相对名落在 --run 目录")
     args = parser.parse_args()
 
-    src = Path(args.input).expanduser()
-    if not src.is_absolute():
-        src = (SEARCH_RESULTS_DIR / src.name).resolve()
-    if not src.is_file():
-        raise SystemExit(f"错误：输入文件不存在: {src}")
+    try:
+        run_dir = resolve_run_dir(args.run) if args.run else None
+        src = resolve_input_path(args.input, run_dir, {".json"})
+    except RunPathError as exc:
+        raise SystemExit(f"错误：{exc}") from None
     payload = json.loads(src.read_text(encoding="utf-8"))
     if not (isinstance(payload.get("data"), dict) and isinstance(payload["data"].get("searches"), list)):
         raise SystemExit("错误：输入不是深度搜索 v3 原始产物（缺 data.searches）——若已是通用形态无需转换，直接进 merge。")
 
     result = convert(payload)
-    out = resolve_output(args.output)
+    try:
+        out = resolve_output(args.output, run_dir)
+    except RunPathError as exc:
+        raise SystemExit(f"错误：{exc}") from None
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     meta = result["search_meta"]

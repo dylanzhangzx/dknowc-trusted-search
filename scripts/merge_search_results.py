@@ -38,8 +38,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-SKILL_ROOT = Path(__file__).resolve().parent.parent
-SEARCH_RESULTS_DIR = SKILL_ROOT / "official-docs" / "search-results"
+from run_paths import RunPathError, resolve_input_path, resolve_output_path, resolve_run_dir
 
 # 公文标题前后缀归一（合并去重用）
 TITLE_PREFIX = ("关于印发", "关于", "印发", "发布", "印发《")
@@ -324,8 +323,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="多路检索结果合并（可信/深度混合 → 渲染器统一形态）")
     parser.add_argument("--input", action="append", required=True, help="输入 JSON（可多次传入，每路一个）")
     parser.add_argument("--search-key", action="append", help="对应 --input 路次的搜索条件分组标签（可多次，缺省自动）")
-    parser.add_argument("--output", "-o", help="输出文件名，默认 official-docs/search-results/merged_all.json")
+    parser.add_argument("--run", help="本次运行的独立目录（必须在 Skill 安装目录之外）")
+    parser.add_argument("--output", "-o", help="输出文件名；相对名落在 --run 目录，默认 merged_all.json")
     args = parser.parse_args()
+
+    try:
+        run_dir = resolve_run_dir(args.run) if args.run else None
+    except RunPathError as exc:
+        raise SystemExit(f"错误：{exc}") from None
 
     if args.search_key and len(args.search_key) != len(args.input):
         raise SystemExit("错误：--search-key 数量必须与 --input 一致（或缺省）。")
@@ -337,11 +342,10 @@ def main() -> None:
     total_in = 0
 
     for _ri, (input_path_str, key) in enumerate(zip(args.input, keys)):
-        raw_path = Path(input_path_str).expanduser()
-        if not raw_path.is_absolute():
-            raw_path = (SEARCH_RESULTS_DIR / raw_path.name).resolve()
-        if not raw_path.is_file():
-            raise SystemExit(f"错误：输入文件不存在: {raw_path}")
+        try:
+            raw_path = resolve_input_path(input_path_str, run_dir, {".json"})
+        except RunPathError as exc:
+            raise SystemExit(f"错误：{exc}") from None
         before = len(articles)
         _collect_route(raw_path, key, articles, policy_files, route_idx=_ri)
         total_in += len(articles) - before
@@ -591,14 +595,10 @@ def main() -> None:
         pf_seen.add(pf_key)
         pf_out.append(p)
 
-    out_name = args.output or "merged_all.json"
-    out = Path(out_name).expanduser()
-    if not out.is_absolute():
-        out = (SEARCH_RESULTS_DIR / out.name).resolve()
     try:
-        out.relative_to(SEARCH_RESULTS_DIR.resolve())
-    except ValueError:
-        raise SystemExit(f"错误：输出文件必须位于 {SEARCH_RESULTS_DIR}") from None
+        out = resolve_output_path(args.output, run_dir, {".json"}, ".json", "merged_all.json")
+    except RunPathError as exc:
+        raise SystemExit(f"错误：{exc}") from None
 
     result = {
         "search_meta": {"merged": True, "input_routes": len(args.input), "merged_from": [str(Path(x).name) for x in args.input]},
@@ -650,7 +650,7 @@ def main() -> None:
     # 每路调用增量（1.6.0）：渲染过程条按真实调用次数展示每条补搜的实际贡献
     result["search_meta"]["calls"] = call_stats
 
-    # official-docs/ 不随发布包携带（平台不接受 .gitkeep，目录由脚本运行期自动创建）
+    # 产物只写 --run 指定的会话目录；Skill 安装目录下不再创建 official-docs/。
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"✓ 合并完成：{len(args.input)} 路 / 输入 {total_in} 篇 → 合并去重后 {len(merged)} 篇"

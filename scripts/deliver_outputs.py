@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """把本次任务产出物复制到用户可见的工作目录（WorkBuddy 等宿主环境）。
 
-产出物默认生成在 skill 安装目录的 official-docs/output/，宿主（如 WorkBuddy）
+产出物生成在会话工作区的 run 目录，宿主（如 WorkBuddy）
 只向用户展示其工作区目录中的文件，导致用户看不到交付物。本脚本自动探测
 宿主工作区，把刚生成的文件复制过去并输出用户可见路径。
 
@@ -19,7 +19,7 @@ WorkBuddy.app），环境变量与当前目录作为兜底；识别不出时返�
      间隔小于 10 分钟（并发会话）时视为歧义，不自动复制，要求 --dest 指定
   4. 豆包宿主：~/DoubaoWork/chats/<日期>/<会话> 中最近活跃的会话目录
   5. 宿主未知：当前目录（仅当当前目录不在 skill 目录树内）
-  6. 都探测不到（宿主未知且 cwd 在 skill 树内）：不复制，交付物保留在 skill 输出目录
+  6. 都探测不到（宿主未知且 cwd 在 skill 树内）：不复制，由调用方显式传 --dest
      （仅 WorkBuddy/豆包有明确工作区才复制，其余宿主不做猜测）
 
 注意一：宿主 agent 执行 skill 脚本时当前目录常在 skill 安装目录内，因此不能用
@@ -36,7 +36,8 @@ WorkBuddy 那版交付物。宿主未知时宁可不复制。
 用法：
   python3 scripts/deliver_outputs.py <文件1> [文件2 ...] [--dest <目录>]
   python3 scripts/deliver_outputs.py --probe    # 只输出宿主识别证据，不复制文件
-  文件路径为空时，自动复制 official-docs/output/ 下最近 10 分钟内新建的文件。
+
+交付文件必须显式传入，脚本不再自动扫描 Skill 目录。
 """
 
 from __future__ import annotations
@@ -53,7 +54,6 @@ import time
 from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_DIR = SKILL_ROOT / "official-docs" / "output"
 RECENT_WINDOW_SECONDS = 10 * 60
 # 只交付面向用户的最终产物：本 skill 唯一交付物是溯源核验报告 HTML；
 # output/ 里的正文 Markdown/TXT（render 的 --answer-file 中间文件）不交付、不复制
@@ -358,8 +358,8 @@ def detect_dest(explicit_dest: str | None, host: str) -> tuple[Path | None, bool
         dest = cwd / "outputs" if (cwd / "outputs").is_dir() else cwd
         return dest, True, "cwd", False, []
 
-    # 宿主身份未知：不复制、不要求 --dest，交付物保留在 skill 输出目录
-    # （仅 WorkBuddy/豆包有明确工作区才复制，其余宿主留在 skill output）
+    # 宿主身份未知：不复制；需要时由调用方显式传 --dest
+    # （仅 WorkBuddy/豆包有明确工作区才自动复制，其余宿主不做猜测）
     if host == "unknown":
         return None, False, "unknown", False, doubao_candidates
 
@@ -427,23 +427,12 @@ def copy_without_overwrite(src: Path, dest: Path) -> dict:
 
 
 def collect_files(args_files: list[str]) -> list[Path]:
-    if args_files:
-        files = []
-        for name in args_files:
-            p = Path(name).expanduser()
-            if not p.is_absolute():
-                p = (SKILL_ROOT / p).resolve() if (SKILL_ROOT / p).is_file() else p.resolve()
-            files.append(p)
-        return files
-    # 未指定文件：取 output 目录最近窗口内新建的文件（按交付后缀白名单过滤，
-    # 防止 output/ 里的正文 .md/.txt 中间文件被自动当作交付物）
-    now = time.time()
     files = []
-    if OUTPUT_DIR.is_dir():
-        for p in sorted(OUTPUT_DIR.iterdir()):
-            if (p.is_file() and (now - p.stat().st_mtime) < RECENT_WINDOW_SECONDS
-                    and p.suffix.lower() in ALLOWED_DELIVERY_SUFFIXES):
-                files.append(p)
+    for name in args_files:
+        p = Path(name).expanduser()
+        if not p.is_absolute():
+            p = (Path.cwd() / p).resolve()
+        files.append(p)
     return files
 
 
@@ -492,10 +481,8 @@ def main() -> int:
                 "不写入其他宿主的工作区，也不写进 skill 目录。"
                 "请用 --dest <本次任务的工作区目录> 重新运行本脚本。")
     elif dest_source == "unknown":
-        # 宿主未知（非 WorkBuddy、非豆包）：交付物保留在 skill 输出目录，不复制
-        # （不做宿主猜测，用户可自行从 skill output 取文件）
-        note = (f"未识别宿主环境（非 WorkBuddy / 豆包），交付物保留在 skill 输出目录 {OUTPUT_DIR}，"
-                "不复制到其他位置。")
+        # 宿主未知（非 WorkBuddy、非豆包）：不做宿主猜测，不复制
+        note = "未识别宿主环境（非 WorkBuddy / 豆包），本次不复制；请显式传 --dest 指定交付目录。"
     elif not files:
         note = "没有找到可交付的产出物"
         results.append({"copied": False, "error": "没有找到可交付的产出物"})
@@ -513,7 +500,7 @@ def main() -> int:
             print(json.dumps({
                 "host_env": False, "host": host, "host_evidence": host_evidence,
                 "need_dest": True, "dest_source": "dest-unusable",
-                "dest": str(dest), "skill_output_dir": str(OUTPUT_DIR),
+                "dest": str(dest), "skill_output_dir": "",
                 "note": (f"无法使用交付目录 {dest}（{exc}）。请确认 --dest 指向一个可用目录后重跑；"
                          "在复制成功前不要向用户交付 skill 内部路径。"),
                 "files": [{"copied": False, "error": str(exc)}],
@@ -533,13 +520,10 @@ def main() -> int:
                               "不得作为交付物展示或复制（导出 Markdown/PDF 由用户在 HTML 顶栏自助操作）。"),
                 })
                 continue
-            try:
-                src.resolve().relative_to(OUTPUT_DIR.resolve())
-            except ValueError:
+            if src.resolve() == SKILL_ROOT or SKILL_ROOT in src.resolve().parents:
                 results.append({
                     "copied": False, "source": str(src),
-                    "error": (f"交付源文件必须位于 {OUTPUT_DIR}/。"
-                              "不得从宿主会话目录或 skill 其它目录直接交付。"),
+                    "error": "交付源文件不能位于 Skill 安装目录内；请交付会话运行目录中的产物。",
                 })
                 continue
             results.append(copy_without_overwrite(src, dest))
@@ -564,7 +548,7 @@ def main() -> int:
         "need_dest": need_dest,
         "dest_source": dest_source,
         "dest": str(dest) if dest is not None else None,
-        "skill_output_dir": str(OUTPUT_DIR),
+        "skill_output_dir": "",
         "note": note,
         "files": results,
     }

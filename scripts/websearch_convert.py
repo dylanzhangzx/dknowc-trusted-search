@@ -37,8 +37,7 @@ import sys
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-SEARCH_RESULTS_DIR = SCRIPT_DIR.parent / "official-docs" / "search-results"
+from run_paths import RunPathError, resolve_input_path, resolve_output_path, resolve_run_dir
 
 CHANNEL = "宿主 WebSearch"
 DEFAULT_GROUP = "公开资料补充"
@@ -263,27 +262,20 @@ def convert(payload, query: str = "", group: str = DEFAULT_GROUP, max_results: i
     }
 
 
-def resolve_output(name: str) -> Path:
-    path = Path(name).expanduser()
-    if not path.is_absolute():
-        path = (SEARCH_RESULTS_DIR / path.name).resolve()
-    try:
-        path.relative_to(SEARCH_RESULTS_DIR.resolve())
-    except ValueError:
-        print(f"错误：输出文件必须位于 {SEARCH_RESULTS_DIR}", file=sys.stderr)
-        raise SystemExit(2) from None
-    return path
+def resolve_output(name: str, run_dir: Path | None) -> Path:
+    if not Path(name).expanduser().is_absolute() and run_dir is None:
+        raise RunPathError("相对 -o/--output 必须同时用 --run 指定运行目录")
+    return resolve_output_path(name, run_dir, {".json"}, ".json", "websearch_converted.json")
 
 
-def _load(path: str):
+def _load(path: str, run_dir: Path | None):
     if path == "-":
         raw = sys.stdin.read()
     else:
-        src = Path(path).expanduser()
-        if not src.is_absolute():
-            src = (SEARCH_RESULTS_DIR / src.name).resolve()
-        if not src.is_file():
-            raise SystemExit(f"错误：输入文件不存在: {src}")
+        try:
+            src = resolve_input_path(path, run_dir, {".json"})
+        except RunPathError as exc:
+            raise SystemExit(f"错误：{exc}") from None
         raw = src.read_text(encoding="utf-8")
     try:
         return json.loads(raw)
@@ -295,8 +287,9 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="宿主 WebSearch 结果转换（外部联网 → 可信同构通用形态）")
-    parser.add_argument("input", nargs="?", default="-", help="宿主 WebSearch 原始 JSON（official-docs/search-results/ 内文件名、绝对路径，或 - 读 stdin）")
-    parser.add_argument("-o", "--output", default="websearch_converted.json", help="输出文件名（official-docs/search-results/ 内）")
+    parser.add_argument("input", nargs="?", default="-", help="宿主 WebSearch 原始 JSON（run 目录内文件名、绝对路径，或 - 读 stdin）")
+    parser.add_argument("--run", help="本次运行的独立目录（必须在 Skill 安装目录之外）")
+    parser.add_argument("-o", "--output", default="websearch_converted.json", help="输出文件名；相对名落在 --run 目录")
     parser.add_argument("--query", default="", help="本次检索词（输入 JSON 顶层带 query 时可省略）")
     parser.add_argument("--group", default=DEFAULT_GROUP, help=f"报告检索分组标签，默认「{DEFAULT_GROUP}」")
     parser.add_argument("--max-results", type=int, default=50, help="最多转换条数（默认 50）")
@@ -304,10 +297,19 @@ def main() -> None:
     parser.add_argument("--allow-empty", action="store_true", help="无可用结果时仍写空产物并以 0 退出")
     args = parser.parse_args()
 
-    payload = _load(args.input)
+    try:
+        run_dir = resolve_run_dir(args.run) if args.run else None
+    except RunPathError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        raise SystemExit(2) from None
+    payload = _load(args.input, run_dir)
     result = convert(payload, query=args.query, group=args.group,
                      max_results=max(1, args.max_results), max_chars=max(200, args.max_chars))
-    out = resolve_output(args.output)
+    try:
+        out = resolve_output(args.output, run_dir)
+    except RunPathError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        raise SystemExit(2) from None
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 

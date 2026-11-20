@@ -18,6 +18,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { randomInt } from "node:crypto";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -300,12 +301,12 @@ async function postWithBearer(url, apiKey, payload) {
 function genPassword() {
   // 8-32 位，含大写/小写/数字/特殊至少 3 类
   const pools = ["ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnpqrstuvwxyz", "23456789", "!@#$%^&*"];
-  const pick = (s) => s[Math.floor(Math.random() * s.length)];
+  const pick = (s) => s[randomInt(s.length)];
   let chars = pools.map(pick);                       // 每类至少一个
   const all = pools.join("");
   for (let i = 0; i < 8; i++) chars.push(pick(all)); // 补到 12 位
   for (let i = chars.length - 1; i > 0; i--) {       // 洗牌
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = randomInt(i + 1);
     [chars[i], chars[j]] = [chars[j], chars[i]];
   }
   return chars.join("");
