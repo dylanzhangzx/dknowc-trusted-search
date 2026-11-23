@@ -1,5 +1,12 @@
 # 更新日志
 
+## 1.8.1-skills-sh - 2026-11-23
+
+- 同步母版 `1.8.1`：内置「溯源核验报告生成器 1.0.1」内核（config、`build_report_input.py`、`trust_digest.py`、`chart_embed.py`、ECHARTS-NOTICE）；新增本产品入口 `scripts/build_trace_input.py`；渲染器严格单输入（materials）。
+- Key 真实校验（`POST open.dknowc.cn/v1/guard`，401/403 → `search_ready=false`/`api_key_invalid`，支持 `--no-verify-key`）；产物命名由 Agent `--output` 指定；知识专库筛选修复；`check_release` 新增产品身份自检（渠道版兼容 ASCII name 与渠道日志格式）。
+- 渠道化沿用既有规则：skills.sh注册渠道码 `8C8D411C-6A46-4E99-887D-87D9A1329930`，slug `dknowc-trusted-search-skills-sh`，attribution channel `skills-sh`；脚本层 skillhub 清零。
+
+
 ## 1.8.0-skills-sh - 2026-11-20
 
 - 同步母版 `1.8.0`（审核整改重封）：运行目录隔离、真实核验与失效重核（`claim_audit.py`、`run_paths.py`）、报告两档口径与 `[n]` 角标弹窗版式。

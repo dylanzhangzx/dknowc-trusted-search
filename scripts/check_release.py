@@ -34,10 +34,54 @@ SECRET_TOKEN_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b")
 # 也不得出现脱敏形式的具体号码（模板一律用 <脱敏手机号> 占位、运行时由脚本 user_message 填充）
 FULL_PHONE_PATTERN = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
 MASKED_PHONE_PATTERN = re.compile(r"1[3-9]\d\*{4}\d{4}")
+# 产品身份（2026-11-23 审核观察 2）：防止 SKILL.md/CHANGE_log 被其他产品同名文件覆盖后仍通过发布检查
+EXPECTED_PRODUCT_NAME = "深知可信搜索"
+
+
+def _frontmatter(path: Path) -> dict:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    if not text.startswith("---"):
+        return {}
+    end = text.find("\n---", 3)
+    if end < 0:
+        return {}
+    data = {}
+    for line in text[3:end].splitlines():
+        match = re.match(r"^([A-Za-z0-9_-]+):\s*(.*)$", line)
+        if match:
+            data[match.group(1)] = match.group(2).strip().strip('"').strip("'")
+    return data
+
+
+def check_product_identity() -> list:
+    """产品身份与版本三件套自检：SKILL.md 名称/版本 + CHANGE_log 当前版本条目。"""
+    findings = []
+    fm = _frontmatter(SKILL_ROOT / "SKILL.md")
+    name = fm.get("name", "")
+    version = fm.get("version", "")
+    if EXPECTED_PRODUCT_NAME not in name and "dknowc-trusted-search" not in name:
+        findings.append(
+            f"SKILL.md: 产品身份不符（name={name!r}，应为「{EXPECTED_PRODUCT_NAME}」系列）——"
+            "疑似被其他产品的同名文件覆盖")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        findings.append(f"SKILL.md: version 缺失或格式非法（{version!r}）")
+    changelog = SKILL_ROOT / "CHANGE_log.md"
+    if changelog.is_file():
+        try:
+            text = changelog.read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        if version and f"## [{version}]" not in text and f"## {version}" not in text:
+            findings.append(
+                f"CHANGE_log.md: 缺少当前版本条目 ## [{version}]（SKILL.md/CHANGE_log 版本不一致）")
+    return findings
 
 
 def main():
-    findings = []
+    findings = check_product_identity()
     for path in SKILL_ROOT.rglob("*"):
         if path.name in BANNED_ARTIFACT_NAMES or path.suffix in BANNED_ARTIFACT_SUFFIXES:
             findings.append(f"{path.relative_to(SKILL_ROOT)}: 公开包不得包含本地产物或平台不允许的文件")

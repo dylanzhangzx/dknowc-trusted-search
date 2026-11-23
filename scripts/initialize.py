@@ -16,8 +16,10 @@ import json
 import os
 import re
 import shutil
+import socket
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -25,6 +27,13 @@ from pathlib import Path
 API_KEY_ENV = "DKNOWC_API_KEY"
 MAAS_PLATFORM_URL = "https://platform.dknowc.cn/auth/#/login"
 PLACEHOLDER_KEYS = {"", "your_api_key_here", "你的深知可信搜索 API Key", "你的深知搜索 API Key"}
+
+# Key 轻量真实校验（1.8.1）：format 通过后调用深知安全风控接口（agent-security）。
+# 该接口只做文本风险分类、不消耗检索额度，响应为毫秒级；8 秒是上限不是常态。
+# 文档：https://platform.dknowc.cn/static/api-docs/agent-security.html
+KEY_PROBE_URL = "https://open.dknowc.cn/v1/guard"
+KEY_PROBE_INPUT = "请帮我整理一份会议纪要。"
+KEY_PROBE_TIMEOUT = 8
 
 # 版本自检：MaaS 技能中心公开目录接口（与平台技能中心页面同源，免认证、不扣积分）。
 # 目录与下载地址均为固定常量（不接受环境变量覆写，防止更新源被替换）；
@@ -46,9 +55,96 @@ UPDATE_TIMEOUT_SECONDS = 3
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """拒绝跟随重定向：Key 校验请求带 Authorization 头，3xx 一律按失败降级，不转发凭证。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_KEY_OPENER = urllib.request.build_opener(_NoRedirectHandler)
+
+
+def _open_request(req: urllib.request.Request, timeout: int):
+    return _KEY_OPENER.open(req, timeout=timeout)
+
+
 def _looks_like_key(value: str) -> bool:
     value = (value or "").strip()
-    return value not in PLACEHOLDER_KEYS and value.startswith("sk-")
+    return value not in PLACEHOLDER_KEYS and value.startswith("sk-") and len(value) >= 20
+
+
+def _resolve_key_value() -> str:
+    """读取当前 Key（环境变量优先，其次专用配置文件）；供轻量校验使用。"""
+    try:
+        from api_key import resolve_api_key
+        api_key, _source = resolve_api_key()
+        return (api_key or "").strip()
+    except ImportError:
+        return os.environ.get(API_KEY_ENV, "").strip()
+
+
+def _verify_key(api_key: str):
+    """轻量真实校验：调用安全风控接口 /v1/guard（无检索额度消耗，8 秒上限）。
+
+    返回 (validated, error, status_code)：
+    - 200 且返回风险分类 → (True, None, None)
+    - 401/403 → (False, 鉴权失败说明, 状态码)，调用方据此阻断；
+    - 402/429/网络/超时/5xx/返回不可解析 → (False, 说明, 状态码或 None)，调用方降级放行。
+    """
+    payload = {"input": KEY_PROBE_INPUT}
+    req = urllib.request.Request(KEY_PROBE_URL, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                                 method="POST")
+    req.add_header("Authorization", f"Bearer {api_key}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with _open_request(req, KEY_PROBE_TIMEOUT) as resp:
+            text = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        code = exc.code
+        if code in (401, 403):
+            return False, f"Key 校验失败（鉴权 {code}）", code
+        return False, f"Key 校验请求未完成（HTTP {code}）", code
+    except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as exc:
+        return False, f"Key 校验请求未完成：{str(exc)[:160]}", None
+    except Exception as exc:  # noqa: BLE001 — 校验绝不抛异常打断初始化
+        return False, f"Key 校验请求未完成：{str(exc)[:160]}", None
+    try:
+        body = json.loads(text)
+    except json.JSONDecodeError:
+        return False, "Key 校验返回不可解析", None
+    code = body.get("code") if isinstance(body, dict) else None
+    if code in (401, 403):
+        return False, f"Key 校验失败（鉴权 {code}）", code
+    status = str(body.get("status") or "") if isinstance(body, dict) else ""
+    if not status:
+        # 200 但无风险分类字段：鉴权已通过，但响应不符合契约定——按不可用降级处理
+        return False, "Key 校验返回缺少 status 字段", None
+    return True, None, None
+
+
+def apply_key_validation(status: dict, blocking_issues: list) -> tuple:
+    """执行轻量校验并落到状态：401/403 阻断；网络/5xx 降级放行。"""
+    if not status.get("api_key_configured") or "--no-verify-key" in sys.argv[1:]:
+        return status, blocking_issues
+    api_key = _resolve_key_value()
+    if not api_key:
+        return status, blocking_issues
+    started = time.perf_counter()
+    validated, error, status_code = _verify_key(api_key)
+    status["key_validation_ms"] = int((time.perf_counter() - started) * 1000)
+    status["key_validated"] = validated
+    status["key_validation_error"] = error
+    if not validated:
+        if status_code in (401, 403):
+            status["search_ready"] = False
+            status["search_note"] = "当前 Key 未通过校验，已停止检索；请按开通引导重新获取。"
+            blocking_issues.append("api_key_invalid")
+        else:
+            status["search_note"] = (
+                f"{error}；已降级放行，首次检索可能失败，联网后请重新运行 initialize.py。"
+            )
+    return status, blocking_issues
 
 
 def check_api_key_config():
@@ -61,9 +157,17 @@ def check_api_key_config():
     except ImportError:
         api_key = os.environ.get(API_KEY_ENV, "").strip()
         source = "environment" if api_key else ""
+    base = {
+        "key_validated": False,
+        "key_validation_error": None,
+        "key_validation_ms": None,
+        "key_validation_note": "默认调用安全风控接口做一次轻量真实校验（8 秒上限，不消耗检索额度）；--no-verify-key 可跳过。Key 失效时按开通引导重新获取。",
+    }
     if _looks_like_key(api_key):
         return {
+            **base,
             "api_key_configured": True,
+            "api_key_check": "format + 安全风控接口真实校验（/v1/guard，8 秒超时，不消耗检索额度）",
             "api_key_env": API_KEY_ENV,
             "api_key_source": source or "environment",
             "api_key_hint": None,
@@ -72,7 +176,9 @@ def check_api_key_config():
         }
 
     return {
+        **base,
         "api_key_configured": False,
+        "api_key_check": "format-only（未配置 Key，未发起真实校验）",
         "api_key_env": API_KEY_ENV,
         "api_key_source": None,
         "api_key_hint": f"本 Skill 需要通过 {API_KEY_ENV} 连接深知可信智能服务以获取可信内容。当前未检测到可用 Key，请先注册或登录深知智能 MaaS 账号并获取 API Key。",
@@ -282,6 +388,9 @@ def main():
     blocking_issues = []
     if not status["api_key_configured"]:
         blocking_issues.append("api_key_missing")
+    else:
+        # 1.8.1：format 通过后做一次轻量真实校验（401/403 阻断；网络/5xx 降级放行）
+        status, blocking_issues = apply_key_validation(status, blocking_issues)
 
     # node 运行时只影响注册链路（register_key.mjs），检索本身用 python3 即可，不作为阻断项。
     node_available = shutil.which("node") is not None
@@ -294,7 +403,7 @@ def main():
         "ready": not blocking_issues,
         # guide_message：需要检索但 Key 未配置时给用户的引导话术（S1 三段式：价值 / 开通方式 / 退路+样例钩子）。
         # Agent 在检索方向确认后向用户转述本话术（可结合任务补充上下文），要素不得删改。
-        "guide_message": None if status["api_key_configured"] else (
+        "guide_message": None if status["api_key_configured"] and "api_key_invalid" not in blocking_issues else (
             "这个问题涉及政策口径和具体数字——普通搜索结果来源杂、无法核验，凭印象答政策名和数字，口径错了会影响你的判断和决策。"
             "开通权威检索后，每条政策、数据都带原文出处、可点开核验，还会附一份可点击的溯源报告。\n"
             "开通是免费的：注册即赠送 10 万积分，完成实名认证再送 10 万积分。"

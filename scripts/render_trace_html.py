@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
-"""可信溯源核验报告渲染器：把搜索结果 JSON + 最终答案渲染为单文件可核验 HTML。
+"""溯源核验报告生成器：把通用材料 JSON + 最终答案渲染为单文件可核验 HTML。
 
-深知可信搜索（渲染层与深知系列核验报告同构，数据口径保持自有与真实）。
-输入直读 trusted_search.py / deep_query.py 的 --json-only 输出（可信搜索 content.data
-或深度搜索 deep-query/v3 格式），正文用 --answer-file 传入最终答案（关键结论带 [n] 角标），
-成稿自检用 --self-check-file 传入五项结果。
+输入为一种通用 JSON 格式（materials 数组 + answer），不依赖任何特定接口产物；
+各业务 Skill 只需把检索/研究结果的要素映射到这份 JSON，即可获得统一版式的溯源核验报告。
+正文用 --answer-file 传入最终答案（关键结论带 [n] 角标），成稿自检用 --self-check-file 传入五项结果。
 
 报告定位：不止展示"材料从哪来"（溯源），更要传达"我们查过了，可以交付"（核验）。
-架构（参考深知晓交互原型）：
+架构：
 - 顶栏：身份章 + 标题 + 工具组（只看正文 / 复制全文 / 打印归档）+ 阅读进度条
 - Hero：大标题 + 真实统计（N 次检索 · M 篇来源文章 · K 处引用）+ 双视图切换
-- 过程回顾条：检索 → 入库 → 逐条比对 → 核验完成（静态回放，数字全部真实计算；
-  无思考流数据就不展示"思考"步骤——硬造即违背核验诚实性）
-- 核验报告视图（默认）：核验报告单 + 正文分节卡；角标点击跳知识专库定位
-- 知识专库视图（全屏）：大搜索 + 热词（标题/正文高频词真实计算）+ 检索分组 tabs + 材料卡
+- 过程回顾条：检索 → 入库 → 逐条比对 → 核验完成（静态回放，数字全部真实计算）
+- 核验报告视图（默认）：核验报告单 + 正文分节卡；角标点击弹「引用依据」弹窗
+- 知识专库视图（全屏）：大搜索 + 检索分组 tabs + 材料卡（未引用材料折叠区）
 三个核验层次：报告级（核验报告单）／材料级（来源卡核验链标记）／引用级（角标一一绑定）。
-诚实原则：脚本真实计算的结果才打勾；无法自动判定的项不虚构展示（"现行效力"人工复核提示行已移除，2026-09-19 起）。
-生成前预处理（内置）：policyFiles 发文字号本地匹配、存档快照兜底（screenShotPath /A/ 容错 + 格式校验；
-原文链接原样进报告、不做活性探测——2026-10-08 起，--skip-link-check 保留为兼容 no-op），
---no-snapshot 关闭）；缺原文链接不拖垮核验结论，按提醒呈现。
+诚实原则：脚本真实计算的结果才打勾；无法自动判定的项不虚构展示。
+核验口径（脚本管字面、模型管语义）：硬错误判"核验未通过"，语义类只作"待人工复核"。
+原文链接原样进报告、不做活性探测；--no-snapshot 关闭存档快照兜底。
 布局为单文件静态 HTML；打印归档模式单栏全展开并附材料附录。
 所有输入输出经路径安全层限制在会话 run 目录（--run）内，拒绝写回 Skill 安装目录。
 """
@@ -34,12 +31,99 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from source_display import source_identity
 from run_paths import RunPathError, resolve_input_path, resolve_output_path, resolve_run_dir
 from claim_audit import audit_answer
+import chart_embed  # 图表渲染共享模块（1.0.1，opt-in：传 --charts-json 才画）
+import trust_digest  # 核验记录指纹（1.0.1，--verify-file 的失效检测）
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import chart_embed  # noqa: E402  图表渲染共享模块（1.4.0，与可视化报告共用）
+
+# ============================================================
+# 配置系统（1.0.1）：品牌 / 通道 / 自检标签 / 双版 / 图表 / 域内核验
+# ============================================================
+# 各业务 Skill 通过 --config 传入自己的 trace_report.config.json；
+# 未传时使用下列默认值（通用报告形态，品牌=溯源核验报告生成器）。
+# 设计约束：定制只走配置，不在渲染代码里 fork。
+
+DEFAULT_CONFIG: Dict[str, Any] = {
+    "brand": {
+        "product_name": "溯源核验报告生成器",
+        "footer_body": "{product} · 正文 ｜ 内容由 AI 生成，仅供参考",
+        "footer_report": "{product} · 溯源核验报告 ｜ 内容由 AI 生成，仅供参考",
+        "argparse_desc": "生成溯源核验报告 HTML（{product}）",
+        "lib_foot_source": "来源：{product} · 每段摘录均取自原文原段",
+        "lib_foot_external": "来源：{product} · 部分材料来自公开网络，已标注非官方来源，请以官方口径复核",
+        "source_fallback": "{product}",
+        "source_fallback_external": "{product}（含公开网络材料）",
+        "report_title_prefix": "溯源核验报告",
+        "default_page_title": "溯源核验报告",
+    },
+    "channels": {
+        "tokens": {},
+        "route_keywords": {},
+        "labels": {},
+        "summary": {"fallback": "通用检索 {n} 路"},
+        "step1_fallback": "通用检索",
+        "internal_token_filter": ["联网", "公开网络", "宿主 WebSearch"],
+        "user_facing_replacements": [],
+    },
+    "selfcheck": {
+        "labels": {
+            "fact_basis": "事实有据",
+            "binding": "角标绑定",
+            "consistency": "答案一致",
+            "freshness": "时效确认",
+            "no_gap": "无未核验断言",
+        }
+    },
+    "stage": {"enable": False, "labels": {}},
+    "charts": {"enable": True},
+    "verify": {"enabled": True, "required": False, "compare_digests": True},
+}
+
+CONFIG: Dict[str, Any] = json.loads(json.dumps(DEFAULT_CONFIG))
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """递归合并配置：override 覆盖 base，未知键保留（向前兼容）。"""
+    out = json.loads(json.dumps(base))
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def apply_config(override: Optional[Dict[str, Any]]) -> None:
+    """载入业务 Skill 配置（缺省键回退默认值）。"""
+    global CONFIG
+    CONFIG = _deep_merge(DEFAULT_CONFIG, override or {})
+
+
+def load_config(path: Optional[str]) -> Dict[str, Any]:
+    if not path:
+        return {}
+    try:
+        data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"错误：配置文件无法读取（{exc}）：{path}", file=sys.stderr)
+        raise SystemExit(2) from None
+    if not isinstance(data, dict):
+        print(f"错误：配置文件必须是 JSON 对象：{path}", file=sys.stderr)
+        raise SystemExit(2) from None
+    return data
+
+
+def brand_text(key: str) -> str:
+    """品牌模板渲染：{product} 占位符替换为配置的产品名。"""
+    brand = CONFIG.get("brand") or {}
+    template = str(brand.get(key) or "")
+    return template.replace("{product}", str(brand.get("product_name") or "溯源核验报告生成器"))
+
+
+def selfcheck_labels() -> Dict[str, str]:
+    labels = (CONFIG.get("selfcheck") or {}).get("labels") or {}
+    return {str(k): str(v) for k, v in labels.items()}
 
 
 def _safe_input_path(value: str, allowed_suffixes: set,
@@ -141,7 +225,7 @@ def verify_snapshots(articles: List[Dict[str, Any]]) -> int:
 
     不做网络可达检测：attach 前置雷池 WAF 的拦截与请求方 IP 风控相关
     （检测机高频请求会被拦而普通用户正常），可达性实测会误杀好快照；
-    快照文件本身的存在性由可信搜索侧的数据质量保障。
+    快照文件本身的存在性由检索来源侧的数据质量保障。
     """
     dropped = 0
     for a in articles:
@@ -161,59 +245,6 @@ def _normalize_title_for_match(value: str) -> str:
     text = re.sub(r"[《》〈〉「」『』\[\]【】()（）]", "", text)
     text = re.sub(r"\s+", "", text)
     return text
-
-
-def attach_doc_numbers(articles: List[Dict[str, Any]], payload: Dict[str, Any]) -> int:
-    """从同一响应的 policyFiles 区按标题本地匹配发文字号（writtenText）。
-
-    文号与检索文章分开展示在同一响应里，本地标题匹配即可拿到，无需接口改动；
-    新闻/解读类不在 policyFiles 中（本就无文号），匹配不上则不显示。
-    检索库对同一政策文件常有多个抓取变体（新闻稿版/发文版，文号挂在发文版条目上），
-    标题精确匹配不上时**不做模糊猜测**（宁缺勿错）——变体识别与回填由 SKILL.md
-    选材规则执行：Agent 引用政策文件时优先带文号的发文版条目。
-    """
-    doc_numbers: Dict[str, str] = {}
-    for holder in (payload.get("content") if isinstance(payload.get("content"), dict) else {},
-                   (payload.get("content") or {}).get("data") if isinstance((payload.get("content") or {}).get("data"), dict) else {},
-                   payload.get("data") if isinstance(payload.get("data"), dict) else {}):
-        for pf in (holder.get("policyFiles") or []):
-            if not isinstance(pf, dict):
-                continue
-            doc_no = first_str(pf.get("writtenText"), pf.get("发文字号"))
-            title = first_str(pf.get("title"), pf.get("标题"))
-            if doc_no and title:
-                doc_numbers.setdefault(_normalize_title_for_match(title), doc_no)
-    if not doc_numbers:
-        return 0
-    matched = 0
-    for a in articles:
-        if a.get("文号"):
-            continue
-        no = doc_numbers.get(_normalize_title_for_match(first_str(a.get("文章标题"), a.get("title"), a.get("标题"))))
-        if no:
-            a["文号"] = no
-            matched += 1
-    return matched
-
-
-def preprocess_articles(articles: List[Dict[str, Any]], payload: Dict[str, Any],
-                        skip_link_check: bool = False, snapshot_enabled: bool = True) -> None:
-    """extract_sources 前的统一预处理：文号匹配、快照兜底。
-
-    直接改写文章 dict（注入 文号 / 快照链接 字段），供 source_from_article 读取；
-    均为幂等操作，多轮渲染不叠加。
-    原文链接活性检测已整体移除（2026-10-08 起）——接口返回的链接原样进报告；
-    skip_link_check 参数保留为兼容 no-op。
-    """
-    attach_doc_numbers(articles, payload)
-    if snapshot_enabled:
-        for a in articles:
-            raw_snap = first_str(a.get("screenShotPath"), a.get("screenshot_path"), a.get("快照链接"), a.get("snapshot"))
-            a["快照链接"] = normalize_snapshot_url(raw_snap) if raw_snap else ""
-        verify_snapshots(articles)
-    else:
-        for a in articles:
-            a["快照链接"] = ""
 
 
 # ============================================================
@@ -301,7 +332,9 @@ def paragraph_text(item: Dict[str, Any]) -> str:
         if text:
             return text
     return clean_paragraph_noise(first_str(
+        item.get("原文"),
         item.get("摘录"),
+        item.get("excerpt"),
         item.get("摘要"),
         item.get("相关段落"),
         item.get("支撑内容"),
@@ -364,18 +397,21 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
         vo.get("title"),
         "未命名来源文章",
     )
-    # 统一走 source_display 口径，避免渲染层另抄一份逻辑。
-    agency, data_source, issuer, is_policy = source_identity(item, vo)
+    # 发布机构：直接从通用 JSON 字段读取（不做标题推导）。
+    issuer = first_str(item.get("发布机构"), item.get("issuer"), item.get("发布机关"), vo.get("issuer"))
+    agency = issuer
+    is_policy = "政策" in str(item.get("来源性质", "")) or "policy" in str(item.get("素材类型", "")).lower()
 
     source = {
         "id": explicit_id or str(index),
         "title": title,
         "agency": agency,
-        "data_source": data_source,
+        "data_source": "",
         "issuer": issuer,
         "is_policy": is_policy,
         "date": first_str(item.get("发布日期"), item.get("date"), item.get("发布时间"), item.get("createDate"), vo.get("dateTime"), vo.get("createDate")),
-        "url": first_str(item.get("sourceUrl"), item.get("source_url"), item.get("源网址"), item.get("原文链接"), item.get("url"), item.get("原文"), vo.get("sourceUrl"), vo.get("url")),
+        # 1.0.1：兜底链不得含「原文」——契约里它是必填摘录文本，兜底会令 has_link 恒真、缺链提醒失效
+        "url": first_str(item.get("sourceUrl"), item.get("source_url"), item.get("源网址"), item.get("原文链接"), item.get("url"), vo.get("sourceUrl"), vo.get("url")),
         "policy_url": first_str(item.get("policyUrl"), item.get("policy_url"), vo.get("policyUrl")),
         "excerpt": segment.get("text") or paragraph_text(item),
         "section": first_str(item.get("正文对应"), item.get("section"), item.get("支撑")),
@@ -409,15 +445,18 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
         item.get("doc_number"),
     )
     # 所属搜索条件（多路检索分组）与引用状态（未引用=接口召回但正文未采用）
-    # 分组标签面向用户：过滤「可信联网/外部联网/阶段X」等内部实现词
-    source["search_key"] = user_facing_text(first_str(item.get("搜索条件"), item.get("search_key")))
-    # 检索通道（深知深度搜索 / 深知可信搜索）：由检索脚本在产物上打标、merge 透传，
+    # 分组标签面向用户：过滤「公开网络/外部联网/阶段X」等内部实现词
+    source["search_key"] = user_facing_text(first_str(item.get("检索分组"), item.get("搜索条件"), item.get("search_key")))
+    # 检索通道（通用检索来源 / 溯源核验报告生成器）：由检索脚本在产物上打标、merge 透传，
     # 供过程条/hero 按接口通道拆分计数；历史 JSON 无该字段时为空（渲染层回退旧文案）
     source["channel"] = first_str(item.get("检索通道"), item.get("channel"))
     # 非官方来源：联网路（searchChannel=webSearch）召回的非权威站点材料。
     # 双口径判定：联网路脚本打标 非官方来源=True；或接口 dataAuthority 返回 数据权威性=非权威。
-    source["unofficial"] = bool(item.get("非官方来源")) or str(
-        item.get("数据权威性") or item.get("authority") or "").strip() in ("非权威", "non-authoritative")
+    source["unofficial"] = (
+        bool(item.get("非官方来源"))
+        or str(item.get("来源性质") or item.get("source_kind") or "").strip().lower() in ("unofficial", "非官方", "非官方来源")
+        or str(item.get("数据权威性") or item.get("authority") or "").strip() in ("非权威", "non-authoritative")
+    )
     source["pending"] = bool(item.get("待核验") or item.get("pending"))
     # 可引用性（1.7.3）：policy 版本索引/无正文材料不得作为正文依据。
     # 缺字段时按摘录是否有内容兜底（历史 JSON 兼容）。
@@ -445,148 +484,79 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
     return source
 
 
-def extract_articles_from_search(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """可信搜索 dependable/search 格式：content.data.检索文章。"""
-    content = payload.get("content") if isinstance(payload.get("content"), dict) else payload
-    data = content.get("data") if isinstance(content.get("data"), dict) else content.get("data")
-    if isinstance(data, dict) and isinstance(data.get("检索文章"), list):
-        return [x for x in data["检索文章"] if isinstance(x, dict)]
-    return []
+def load_materials(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """从通用 JSON 读取材料列表。
 
-
-def extract_articles_from_deep(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """深度搜索 deep-query/v3 非流式格式：{"data": {"searches": [{"result": [...]}], "common_articles": [...]}}。
-
-    按源网址去重摊平；为每篇材料注入"搜索条件"（子查询的地域·查询词），供知识专库检索分组筛选。
+    顶层 materials / 材料 / sources 均可；顶层是数组也接受。
+    每条材料必须有"标题"与"原文"（摘录）；编号缺省按数组顺序 1-based。
     """
-    data = payload.get("data")
-    if not isinstance(data, dict):
-        return []
-    searches = data.get("searches")
-    if not isinstance(searches, list):
-        return []
-    seen: set = set()
-    out: List[Dict[str, Any]] = []
-
-    def _add(article: Any, search_key: str) -> None:
-        if not isinstance(article, dict):
-            return
-        key = str(article.get("源网址") or article.get("文章标题") or "")
-        if key and key in seen:
-            return
-        if key:
-            seen.add(key)
-        if search_key and not article.get("搜索条件"):
-            article["搜索条件"] = search_key
-        out.append(article)
-
-    for search in searches:
-        if not isinstance(search, dict):
-            continue
-        areas = "、".join(str(a) for a in (search.get("areas") or []))
-        query = str(search.get("query") or "").strip()
-        label = f"{areas}·{query[:14]}" if areas else query[:18]
-        for article in search.get("result") or []:
-            _add(article, label)
-    for article in data.get("common_articles") or []:
-        # 多查询公共文章给独立分组名（空 key 落不进任何分组 tab，无法筛选）
-        _add(article, "多查询公共")
-    return out
-
-
-def extract_reference_materials(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-    materials = payload.get("referenceMaterials")
-    if isinstance(materials, list):
-        return [x for x in materials if isinstance(x, dict)]
-    return []
+    raw = payload.get("materials")
+    if not isinstance(raw, list):
+        raw = payload.get("材料")
+    if not isinstance(raw, list):
+        raw = payload.get("sources")
+    if not isinstance(raw, list) and isinstance(payload.get("data"), list):
+        # 顶层数组经 load_json 包装为 {"data": [...]}（兼容裸材料数组输入）
+        raw = payload["data"]
+    if not isinstance(raw, list):
+        if isinstance(payload, list):
+            raw = payload
+        else:
+            return []
+    articles = [x for x in raw if isinstance(x, dict)]
+    # 编号缺省补齐
+    for idx, item in enumerate(articles):
+        if not first_str(item.get("编号"), item.get("角标"), item.get("index")):
+            item["编号"] = str(idx + 1)
+    return articles
 
 
 def extract_sources(payload: Dict[str, Any],
-                    skip_link_check: bool = False, snapshot_enabled: bool = True) -> List[Dict[str, str]]:
-    raw_sources: List[Dict[str, Any]] = []
-    raw_sources.extend(extract_reference_materials(payload))
-    is_deep = bool(extract_articles_from_deep(payload))
-    raw_sources.extend(extract_articles_from_search(payload))
-    raw_sources.extend(extract_articles_from_deep(payload))
-    if not is_deep:
-        # 可信搜索单次检索：材料统一标注"本次检索"分组（多轮检索由 Agent 合并 JSON 后各自携带）
-        for item in raw_sources:
-            if not item.get("搜索条件"):
-                item["搜索条件"] = "本次检索"
+                    snapshot_enabled: bool = True) -> List[Dict[str, str]]:
+    """通用 JSON → 渲染器内部 source dict 列表。"""
+    raw_sources = load_materials(payload)
 
-    # 生成前预处理：文号匹配（policyFiles）、快照兜底（不做链接活性探测）
-    preprocess_articles(raw_sources, payload, skip_link_check=skip_link_check, snapshot_enabled=snapshot_enabled)
+    # 快照兜底
+    if snapshot_enabled:
+        for a in raw_sources:
+            raw_snap = first_str(a.get("快照链接"), a.get("snapshot"), a.get("screenShotPath"))
+            a["快照链接"] = normalize_snapshot_url(raw_snap) if raw_snap else ""
+        verify_snapshots(raw_sources)
+    else:
+        for a in raw_sources:
+            a["快照链接"] = ""
 
     sources: List[Dict[str, str]] = []
-    seen = set()
+    seen_ids = set()
     for item in raw_sources:
-        # 一篇材料一张卡：段落合并为摘录（paragraph_text 拼接全部段落），不按段落拆卡——
-        # 溯源 JSON 的 materials 与正文角标按"材料"粒度一一对应，拆段会使编号错位。
         source = source_from_article(item, len(sources) + 1)
-        # 去重键（2026-10-08 修复）：归一化「标题+URL」。旧键含 id（递增序号每条不同）
-        # 等于从不去重——同一篇文章跨提取器/多段片段全部出卡（实测曾出现同名卡片 ×17）。单边缺失退用其一，均缺失退摘录前缀。
-        t_key = re.sub(r"\s+", "", source["title"] or "")
-        u_key = (source["url"] or "").strip().rstrip("/")
-        if u_key == "接口未返回":
-            u_key = ""
-        if t_key and u_key:
-            key = ("tu", t_key, u_key)
-        elif t_key:
-            key = ("t", t_key)
-        elif u_key:
-            key = ("u", u_key)
-        else:
-            key = ("e", (source["excerpt"] or "")[:80])
-        if key in seen:
-            continue
-        seen.add(key)
-        if not source["id"]:
-            source["id"] = str(len(sources) + 1)
+        # 编号重复报错
+        if source["id"] in seen_ids:
+            print(f"错误：材料编号 {source['id']} 重复（标题：{source['title'][:30]}）。"
+                  "请检查通用 JSON 中各材料的 编号 字段。", file=sys.stderr)
+            raise SystemExit(2)
+        seen_ids.add(source["id"])
+        if not source["search_key"]:
+            source["search_key"] = "本轮检索"
         sources.append(source)
     return sources
 
 
 def extract_answer(payload: Dict[str, Any]) -> str:
-    resp = payload.get("resp")
-    if isinstance(resp, dict):
-        answer = first_str(resp.get("content"), resp.get("answer"), resp.get("text"))
-        if answer:
-            return normalize_citations(answer)
-    answer = first_str(payload.get("answer"), payload.get("contentText"), payload.get("text"))
+    answer = first_str(payload.get("answer"), payload.get("答案"))
     if answer:
         return normalize_citations(answer)
-    articles = extract_articles_from_search(payload)
-    if articles:
-        rows = ["可信搜索召回了以下重点来源文章："]
-        for idx, item in enumerate(articles[:8], start=1):
-            rows.append(f"[{idx}] {first_str(item.get('文章标题'), item.get('title'), item.get('标题'), '未命名来源文章')}")
+    materials = load_materials(payload)
+    if materials:
+        rows = ["以下材料已入库，但未传入答案正文；请用 --answer-file 传入带 [n] 角标的最终答案："]
+        for idx, item in enumerate(materials[:8], start=1):
+            rows.append(f"[{idx}] {first_str(item.get('标题'), item.get('title'), item.get('name'), '未命名材料')}")
         return "\n".join(rows)
-    deep_articles = extract_articles_from_deep(payload)
-    if deep_articles:
-        rows = ["深度搜索召回了以下重点来源文章："]
-        for idx, item in enumerate(deep_articles[:8], start=1):
-            vo = item.get("vo") if isinstance(item.get("vo"), dict) else {}
-            rows.append(f"[{idx}] {first_str(item.get('文章标题'), vo.get('showTitle'), vo.get('title'), item.get('title'), '未命名来源文章')}")
-        return "\n".join(rows)
-    return "接口返回中未识别到正文内容；请查看知识专库或原始 JSON。"
+    return "输入 JSON 中未识别到答案正文；请用 --answer-file 传入。"
 
 
 def extract_question(payload: Dict[str, Any]) -> str:
-    content = payload.get("content") if isinstance(payload.get("content"), dict) else payload
-    data = content.get("data") if isinstance(content.get("data"), dict) else {}
-    first_query = ""
-    searches = data.get("searches") if isinstance(data.get("searches"), list) else None
-    if searches and isinstance(searches[0], dict):
-        first_query = str(searches[0].get("query") or "")
-    return first_str(
-        payload.get("question"),
-        payload.get("input"),
-        payload.get("query"),
-        data.get("用户问题"),
-        first_query,
-        content.get("query"),
-        content.get("question"),
-    )
+    return first_str(payload.get("question"), payload.get("问题"), payload.get("query"))
 
 
 def citation_ids(answer: str) -> List[str]:
@@ -602,19 +572,9 @@ def citation_ids(answer: str) -> List[str]:
 # 核验计算（报告级）
 # ============================================================
 
-SELF_CHECK_ITEMS = [
-    ("fact_basis", "事实有据"),
-    ("binding", "角标绑定"),
-    ("consistency", "答案一致"),
-    ("freshness", "时效确认"),
-    ("no_gap", "无未核验断言"),
-]
-
-SELF_CHECK_LABELS = dict(SELF_CHECK_ITEMS)
-SELF_CHECK_LABELS.update({
-    "事实有据": "事实有据", "角标绑定": "角标绑定", "答案一致": "答案一致",
-    "时效确认": "时效确认", "无未核验断言": "无未核验断言",
-})
+def self_check_items() -> List[Tuple[str, str]]:
+    """当前配置的五项自检（key, 显示名）；业务 Skill 可整体替换标签集。"""
+    return [(str(k), str(v)) for k, v in selfcheck_labels().items()]
 
 
 def classify_check_value(raw: Any) -> Tuple[str, str]:
@@ -642,7 +602,7 @@ USER_FACING_REPLACEMENTS = (
     ("宿主 WebSearch", "公开网络检索"),
     ("外部联网材料", "公开网络材料"),
     ("外部联网", "公开网络"),
-    ("可信联网", "可信搜索"),
+    ("公开网络", "检索来源"),
     ("阶段三", "补充检索"),
     ("阶段二", "补充检索"),
     ("阶段一", "检索"),
@@ -657,7 +617,9 @@ USER_FACING_REPLACEMENTS = (
 
 def user_facing_text(text: str) -> str:
     out = str(text or "")
-    for src, dst in USER_FACING_REPLACEMENTS:
+    configured = (CONFIG.get("channels") or {}).get("user_facing_replacements") or []
+    pairs = [(str(x[0]), str(x[1])) for x in configured if isinstance(x, (list, tuple)) and len(x) >= 2]
+    for src, dst in (pairs or USER_FACING_REPLACEMENTS):
         out = out.replace(src, dst)
     return out
 
@@ -666,11 +628,17 @@ def normalize_self_check(raw: Any) -> Optional[Dict[str, Tuple[str, str]]]:
     if not isinstance(raw, dict):
         return None
     items: Dict[str, Tuple[str, str]] = {}
+    labels = selfcheck_labels()
     for key, value in raw.items():
-        # 只认五项标准自检键（英文/中文）；白名单外的多余键（如 Agent 自行追加的
-        # "备注""待核验/下一步补充"等描述性键）不构成"交付前检查"定义的核验项，
-        # 直接忽略不计入——核验单只统计定义过的检查项（2026-09-20 实测修正）。
-        label = SELF_CHECK_LABELS.get(key) or SELF_CHECK_LABELS.get(str(key))
+        # 只认配置里的自检键（英文 key 或与显示名相同的中文键）；白名单外的多余键
+        # （如 Agent 自行追加的"备注"等描述性键）不构成核验项，直接忽略不计入。
+        label = labels.get(key) or labels.get(str(key))
+        if not label:
+            # 兼容业务 Skill 直接用中文显示名作为键（如公文的"事实有据"）
+            for display in labels.values():
+                if str(key) == display:
+                    label = display
+                    break
         if not label:
             continue
         status, note = classify_check_value(value)
@@ -747,7 +715,7 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
         self_check = {"items": self_items, "passed": passed, "total": len(self_items), "failed": failed,
                       "status": "fail" if failed else "pass"}
     else:
-        self_check = {"items": {}, "passed": 0, "total": len(SELF_CHECK_ITEMS), "failed": 0, "status": "missing"}
+        self_check = {"items": {}, "passed": 0, "total": len(self_check_items()), "failed": 0, "status": "missing"}
 
     # 政策效力：无法自动判定现行效力，列出建议人工复核
     policy_count = coverage.get("policy", 0)
@@ -768,6 +736,48 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
             _add_audit_fail("核验记录", str(audit.get("stale_reason") or "核验记录与当前答案/依据不一致，需重新核验"))
         audit_ok = bool(audit.get("passed"))
 
+    # ⑥ 域内核验记录（--verify-file）：业务 Skill 自己的核验器（verify_claims 等）产出。
+    # 只做"并入"：verdict 为 fail / 记录指纹失效（答案或证据在核验后被改）按硬错误；
+    # 其余 issues 计入核验明细（软提醒）。不要求所有 Skill 都用同一套核验实现。
+    verify_record = None
+    _content_holder = payload.get("content") if isinstance(payload.get("content"), dict) else {}
+    for holder in (payload, _content_holder):
+        verify_record = verify_record or holder.get("verifyRecord") or holder.get("verify_record")
+    verify_cfg = CONFIG.get("verify") or {}
+    verify_state = {"present": False, "verdict": "", "stale": False, "notes": [], "hard": False}
+    verify_manual: List[str] = []
+    verify_ok = True
+    if verify_cfg.get("enabled", True):
+        if not verify_record:
+            if verify_cfg.get("required"):
+                verify_state["hard"] = True
+                verify_state["notes"] = ["缺少核验记录（--verify-file 未传入）"]
+                verify_ok = False
+        else:
+            verify_state["present"] = True
+            record = verify_record.get("record") if isinstance(verify_record.get("record"), dict) else verify_record
+            verdict = str(verify_record.get("verdict") or (record or {}).get("verdict") or "").strip()
+            verify_state["verdict"] = verdict
+            evidence_items = [{"id": s.get("id"), "url": s.get("url")} for s in sources]
+            # 业务侧 digest 口径未对齐时可关闭比对（只采信 verdict/issues），避免"永远 stale"
+            stale = (trust_digest.stale_reason(record, answer, evidence_items)
+                     if verify_cfg.get("compare_digests", True) else "")
+            issues = [str(x) for x in (verify_record.get("issues") or []) if str(x).strip()][:20]
+            if stale:
+                verify_state["stale"] = True
+                if verify_cfg.get("required"):
+                    verify_state["hard"] = True
+                    verify_state["notes"].append(str(stale))
+                    verify_ok = False
+                else:
+                    verify_manual.append(f"核验记录提示：{stale}")
+            if verdict and verdict.lower() != "pass":
+                verify_state["hard"] = True
+                verify_state["notes"].append("域内核验未通过（verdict=fail）")
+                verify_ok = False
+            prefix = "核验问题：" if verify_state["hard"] else "核验提示："
+            verify_manual.extend(prefix + issue for issue in issues)
+
     trace_ok = cited_sources and not bad_ids
     binding_ok = (not unbound) and not no_citation
     # 1.7.3：存在无摘录/不可引用正文依据时，交付前检查不能仍显示全绿；
@@ -780,7 +790,7 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
         self_check["status"] = "fail"
     # 自检显式"未通过"纳为报告级否决项：不能自检失败还顶部打绿章。
     self_check_ok = self_check["status"] != "fail"
-    overall_passed = bool(trace_ok and binding_ok and self_check_ok and audit_ok)
+    overall_passed = bool(trace_ok and binding_ok and self_check_ok and audit_ok and verify_ok)
 
     reasons = []
     if not sources:
@@ -799,6 +809,8 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
         reasons.append("存在阻断性缺口")
     if self_check["status"] == "fail":
         reasons.append("交付前检查有没过的项")
+    if not verify_ok:
+        reasons.extend(verify_state["notes"] or ["域内核验未通过"])
     # 缺原文链接/存档快照属回看通道提醒（软项），只进顶部表述与指标行，不进红色失败原因。
 
     if overall_passed and missing_links:
@@ -823,9 +835,11 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
         "self_check": self_check,
         "policy_count": policy_count,
         "claim_audit": audit or {},
+        "verify": verify_state,
         "manual_checks": list(dict.fromkeys(
             [str(x) for x in (payload.get("verificationChecks") or payload.get("verification_checks") or []) if str(x).strip()]
             + list((audit or {}).get("manual_checks") or [])
+            + verify_manual
         )),
     }
 
@@ -835,48 +849,55 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
 # ============================================================
 
 def route_kind(channel: str) -> str:
-    """检索通道归类：web=宿主 WebSearch / deep=深度搜索 / trusted=可信搜索。"""
+    """按配置的通道关键词把原始通道标记归为 deep / trusted / web。
+
+    通用 JSON 默认无通道约定（route_keywords 为空 → 返回空，统计回退单通道）；
+    业务 Skill 在 config.channels.route_keywords 里配置自己的词表。
+    """
     text = str(channel or "")
-    if "WebSearch" in text or "宿主" in text:
-        return "web"
-    if "深度" in text:
-        return "deep"
-    if "可信" in text:
-        return "trusted"
+    rules = (CONFIG.get("channels") or {}).get("route_keywords") or {}
+    for kind in ("web", "deep", "trusted"):
+        for keyword in (rules.get(kind) or []):
+            if keyword and keyword in text:
+                return kind
     return ""
 
 
 def channel_label(channel: str) -> str:
-    """过程条明细的通道标签：只暴露产品既有口径（深度搜索/可信搜索）。
-
-    三阶段、可信联网、宿主 WebSearch 属内部实现细节，不进入用户可见报告；
-    外部材料的来源性质由材料卡上的「非官方来源」徽标表达。
-    """
+    """过程条明细行的通道后缀：config.channels.labels 里 kind→显示名；未配置则空。"""
     kind = route_kind(channel)
-    if kind == "deep":
-        return "深度搜索"
-    if kind == "trusted":
-        return "可信搜索"
-    return ""
+    if not kind:
+        return ""
+    return str((CONFIG.get("channels") or {}).get("labels", {}).get(kind) or "")
 
 
 def route_summary(deep_n: int, trusted_n: int, n_searches: int) -> str:
-    """过程条/hero 的检索摘要：保留 1.7.1 既有口径，不暴露三阶段/外部联网细节。"""
+    """过程条/hero 的检索摘要：按配置模板拼装；未配置任何模板时按次数显示。"""
+    summary = (CONFIG.get("channels") or {}).get("summary") or {}
     parts = []
-    if deep_n:
-        parts.append(f"深度搜索 {deep_n} 路")
-    if trusted_n:
-        parts.append(f"可信补搜 {trusted_n} 次")
-    return " · ".join(parts) if parts else f"深知检索 {n_searches} 路"
+    if deep_n and summary.get("deep"):
+        parts.append(str(summary["deep"]).format(deep=deep_n, trusted=trusted_n, n=n_searches))
+    if trusted_n and summary.get("trusted"):
+        parts.append(str(summary["trusted"]).format(deep=deep_n, trusted=trusted_n, n=n_searches))
+    if parts:
+        return " · ".join(parts)
+    fallback = str(summary.get("fallback") or "通用检索 {n} 路")
+    return fallback.format(deep=deep_n, trusted=trusted_n, n=n_searches)
 
 
 def channel_tokens(channels: List[str]) -> List[str]:
-    """来源行通道 token 汇总：只保留产品名，过滤内部通道标记（联网/宿主 WebSearch）。"""
+    """来源行通道 token 汇总：按配置过滤内部通道标记，可做 token 映射。"""
+    chan_cfg = CONFIG.get("channels") or {}
+    filters = {str(x) for x in (chan_cfg.get("internal_token_filter") or [])}
+    token_map = {str(k): str(v) for k, v in (chan_cfg.get("tokens") or {}).items()}
     tokens: List[str] = []
     for channel in channels:
         for token in re.split(r"[、·]", str(channel or "")):
             token = token.strip()
-            if not token or token in ("联网", "可信联网", "宿主 WebSearch"):
+            if not token or token in filters:
+                continue
+            token = token_map.get(token, token)
+            if not token or token in filters:
                 continue
             if token not in tokens:
                 tokens.append(token)
@@ -898,7 +919,7 @@ def compute_process_stats(sources: List[Dict[str, str]], answer: str,
     cond_rows = []
     for key in order:
         group = [s for s in sources if (s.get("search_key") or "").strip() == key]
-        # 该路检索的接口通道（深知深度搜索/深知可信搜索）：取组内多数通道
+        # 该路检索的接口通道（通用检索来源/溯源核验报告生成器）：取组内多数通道
         chan_counts: Dict[str, int] = {}
         for s in group:
             ch = (s.get("channel") or "").strip()
@@ -929,7 +950,7 @@ def compute_process_stats(sources: List[Dict[str, str]], answer: str,
             "delta": delta,
         })
     n_searches = len(cond_rows) or (1 if sources else 0)
-    # 深度/可信互斥计数（2026-10-16 修复）：多数通道为拼接值（"深知深度搜索、深知可信搜索"）
+    # 深度/可信互斥计数（2026-10-16 修复）：多数通道为拼接值（"通用检索来源、溯源核验报告生成器"）
     # 的组同时含两个关键词，若不互斥会被两边各计一次——WB 实测"补搜 10 次"被虚报成 13 次，
     # 与过程条明细行（if/else 口径）自相矛盾。此处与明细行同口径：含"深度"优先归深度。
     deep_routes = sum(1 for r in cond_rows if route_kind(r.get("channel", "")) == "deep")
@@ -938,7 +959,7 @@ def compute_process_stats(sources: List[Dict[str, str]], answer: str,
                              if route_kind(r.get("channel", "")) == "trusted"
                              and "联网" in r.get("channel", ""))
     web_routes = sum(1 for r in cond_rows if route_kind(r.get("channel", "")) == "web")
-    # 外部材料按 unofficial 判定，覆盖阶段二（深知可信搜索·联网，route_kind=trusted）
+    # 外部材料按 unofficial 判定，覆盖阶段二（溯源核验报告生成器·联网，route_kind=trusted）
     # 与阶段三（宿主 WebSearch）；不能只看 pending/web，否则阶段二口径切换不生效。
     external_materials = sum(1 for s in sources if s.get("unofficial") or s.get("pending"))
     used_count = sum(1 for s in sources if s.get("used", True))
@@ -1353,10 +1374,22 @@ def render_verify_panel(v: Dict[str, Any]) -> str:
     cov_html = (f'<div class="vi"><span class="s ok">✓ 材料构成</span>'
                 f'<span class="d">{esc(" · ".join(parts))}</span></div>') if parts else ""
 
+    # 域内核验行（--verify-file）：只在业务 Skill 传入核验记录时出现
+    vr = v.get("verify") or {}
+    verify_html = ""
+    if vr.get("present"):
+        if vr.get("hard"):
+            detail = "；".join(vr.get("notes") or []) or "域内核验未通过"
+            verify_html = (f'<div class="vi"><span class="s fail">✗ 域内核验 未通过</span>'
+                           f'<span class="d">{esc(short(detail, 120))}</span></div>')
+        else:
+            verify_html = ('<div class="vi"><span class="s ok">✓ 域内核验 已通过</span>'
+                           '<span class="d">结论台账校验记录已并入本核验单</span></div>')
+
     sc = v["self_check"]
     selfcheck_notes_html = ""
     if sc["status"] == "pass":
-        item_names = "、".join(sc["items"].keys()) if sc["items"] else "、".join(label for _, label in SELF_CHECK_ITEMS)
+        item_names = "、".join(sc["items"].keys()) if sc["items"] else "、".join(label for _, label in self_check_items())
         unrecorded = sc["total"] - sc["passed"] - sc.get("failed", 0)
         sc_head = f'✓ 交付前检查 {sc["passed"]}/{sc["total"]}' if not unrecorded else \
             f'✓ 交付前检查 通过（{unrecorded} 项未记录）'
@@ -1388,7 +1421,7 @@ def render_verify_panel(v: Dict[str, Any]) -> str:
       <div class="v-head"><span class="v-shield">{'✓' if ov['passed'] else '!'}</span>{esc(ov['label'])}{stamp}</div>
       {reasons_html}
       <div class="v-grid">
-        {tr_html}{bd_html}{fr_html}{cov_html}{sc_html}{manual}
+        {tr_html}{bd_html}{fr_html}{cov_html}{verify_html}{sc_html}{manual}
       </div>
       <div class="v-note">AI 已完成自验收，正文依据可逐条点开原文复核。{selfcheck_notes_html}{manual_checks_html}</div>
     </div>"""
@@ -1648,8 +1681,8 @@ def render_process_bar(stats: Dict[str, Any], verification: Dict[str, Any]) -> s
     ov = verification["overall"]
     tr = verification["traceability"]
     first_query = stats["conds"][0]["key"] if stats["conds"] else ""
-    # 步骤一标题按接口通道拆分（深度搜索/可信联网/宿主 WebSearch 是不同通道，不混计）；
-    # 无通道信息（历史 JSON）时退回"深知检索 N 路"
+    # 步骤一标题按接口通道拆分（检索来源/公开网络/宿主 WebSearch 是不同通道，不混计）；
+    # 无通道信息（历史 JSON）时退回"通用检索 N 路"
     deep_n = stats.get("deep_routes", 0)
     trusted_n = stats.get("trusted_routes", 0)
     step1_title = route_summary(deep_n, trusted_n, stats["n_searches"])
@@ -1669,7 +1702,7 @@ def render_process_bar(stats: Dict[str, Any], verification: Dict[str, Any]) -> s
     elif first_query:
         step1_sub = esc(short(first_query, 26))
     else:
-        step1_sub = "深知可信搜索"
+        step1_sub = str((CONFIG.get("channels") or {}).get("step1_fallback") or "通用检索")
     step4_state = "done" if ov["passed"] else "bad"
     step4_icon = "✓" if ov["passed"] else "!"
     step4_label = "已核验" if ov["passed"] else "核验未通过"
@@ -1759,7 +1792,10 @@ def render_library_view(sources: List[Dict[str, str]], doc_title: str = "") -> s
     cards_html = "".join(render_source_card(s) for s in used_sources)
     # 未进入正文的召回材料保留为参考资料，展示原文摘录，供用户判断是否值得回看。
     unused_html = "".join(render_source_card(s) for s in unused_sources)
-    unused_block = (f'<details class="lib-unused" open><summary>未进入正文的参考材料（{len(unused_sources)}）'
+    # 折叠区标题计数由 JS 随筛选动态更新（1.0.1）：data-total 保存全量数，
+    # lu-title 在选中分组/搜索词时改为"本组未进入正文的参考材料（N）"。
+    unused_block = (f'<details class="lib-unused" open data-total="{len(unused_sources)}">'
+                    f'<summary><span class="lu-title">未进入正文的参考材料（{len(unused_sources)}）</span>'
                     f' · 供参考，未参与答案结论</summary><div class="lib-list">{unused_html}</div></details>'
                     if unused_sources else "")
     # 只有一组检索条件时，“全部/本次检索”两个 tab 完全重复，直接隐藏。
@@ -1768,8 +1804,8 @@ def render_library_view(sources: List[Dict[str, str]], doc_title: str = "") -> s
 
     lib_title = f"知识专库：{doc_title}" if doc_title.strip() else "知识专库"
     has_external = any(s.get("unofficial") or s.get("pending") for s in sources)
-    lib_foot = ("来源：深知可信搜索 · 每段摘录均取自原文原段" if not has_external
-                else "来源：深知可信搜索 · 部分材料来自公开网络，已标注非官方来源，请以官方口径复核")
+    lib_foot = (brand_text("lib_foot_source") if not has_external
+                else brand_text("lib_foot_external"))
     return f"""
     <section class="view" id="view-library" aria-label="知识专库">
       <div class="lib-head">
@@ -1837,8 +1873,9 @@ def safe_output_filename(question: str, timestamp: datetime, fallback: str = "dk
     normalized = normalized.strip("._-")
     if not normalized:
         normalized = fallback
-    # 1.5.0：产物名即《标题.html》（无"_溯源核验报告"后缀、无时间戳）；同题重跑的
-    # _v2/_v3 版本化由 unique_output_path 的同名检测负责，不依赖时间戳
+    # 产物名优先由 Agent 通过 --output 指定（简短的标题式文件名）；
+    # 本函数仅作未指定时的兜底：问题截断 32 字、空格转下划线。
+    # 内部重跑覆盖同名文件，版本编号只在交付层产生（2026-11-23 起）
     stem = normalized[:32].strip("._-") or fallback
     return f"{stem}{suffix_ext}"
 
@@ -2087,6 +2124,7 @@ a.jb-quote{text-decoration:none}
 .lib-list{max-width:860px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr);gap:14px}
 .lib-empty{max-width:860px;margin:30px auto;text-align:center;color:var(--muted);font-size:13.5px}
 .lib-empty.hide{display:none}
+.lib-unused.hide{display:none}
 .lib-foot{text-align:center;color:var(--muted);font-size:11.5px;padding:18px 0 0;line-height:1.8}
 .lib-unused{max-width:860px;margin:20px auto 0;border-top:1px dashed var(--line);padding-top:12px}
 .lib-unused summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:6px 0;list-style:none}
@@ -2590,17 +2628,38 @@ PAGE_JS = """
   /* ===== 7. 知识专库：tabs + 搜索 + 热词 ===== */
   var cond = "";
   var kw = "";
+  /* 筛选必须同时覆盖主列表与"未进入正文"折叠区（1.0.1 修复：此前只过滤主列表，
+     选中分组后折叠区仍展示其他组的材料，标签数与可见结果对不上）。 */
+  var filterCards = $$("#lib-list .scard, .lib-unused .scard");
+  var unusedBox = $(".lib-unused");
+  var luTitle = unusedBox ? unusedBox.querySelector(".lu-title") : null;
   function applyFilter() {
     var visible = 0;
-    cards.forEach(function (c) {
+    var unusedVisible = 0;
+    filterCards.forEach(function (c) {
       var okCond = !cond;
       if (cond === "__unused__") okCond = c.getAttribute("data-unused") === "1";
       else if (cond) okCond = c.getAttribute("data-search") === cond;
       var okKw = !kw || (c.textContent || "").toLowerCase().indexOf(kw) !== -1;
       var show = okCond && okKw;
       c.classList.toggle("hide", !show);
-      if (show) visible++;
+      if (show) {
+        visible++;
+        if (c.getAttribute("data-unused") === "1") unusedVisible++;
+      }
     });
+    if (unusedBox && luTitle) {
+      var total = unusedBox.getAttribute("data-total") || "0";
+      if (cond) {
+        luTitle.textContent = "本组未进入正文的参考材料（" + unusedVisible + "）";
+      } else if (kw) {
+        luTitle.textContent = "未进入正文的参考材料（" + unusedVisible + "）";
+      } else {
+        luTitle.textContent = "未进入正文的参考材料（" + total + "）";
+      }
+      unusedBox.classList.toggle("hide", unusedVisible === 0);
+      if (cond && unusedVisible > 0) unusedBox.open = true;
+    }
     var empty = $("#lib-empty");
     if (empty) empty.classList.toggle("hide", visible !== 0);
   }
@@ -2688,9 +2747,10 @@ PAGE_JS = """
 
 def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", question_override: str = "",
                 generated_at: Optional[datetime] = None,
-                skip_link_check: bool = False, snapshot_enabled: bool = True,
+                snapshot_enabled: bool = True,
+                research_notes: Optional[Dict[str, int]] = None,
                 charts_data: Optional[Dict[str, Any]] = None,
-                research_notes: Optional[Dict[str, int]] = None) -> str:
+                stage_label: str = "") -> str:
     # search_meta.calls（每路调用增量）在 unwrap 前捕获——unwrap 会把 content 外层剥掉（1.6.0）
     _calls_meta = payload.get("search_meta") if isinstance(payload.get("search_meta"), dict) else {}
     payload = unwrap(payload)
@@ -2705,7 +2765,7 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
                 and not _first.endswith(("。", "；", "！", "？", "!", "?", ".", ";"))):
             _rest = answer[answer.index(_first) + len(_first):].lstrip("\n")
             answer = f"# {_first}\n{_rest}"
-    sources = align_sources_to_answer(answer, extract_sources(payload, skip_link_check=skip_link_check, snapshot_enabled=snapshot_enabled))
+    sources = align_sources_to_answer(answer, extract_sources(payload, snapshot_enabled=snapshot_enabled))
     # 角标按首次出现顺序重排为 1..N（含材料卡同步重编号与未引用分组），WorkBuddy 实测反馈要求
     answer, sources = renumber_citations(answer, sources)
     audit = audit_answer(answer, sources, payload)
@@ -2737,6 +2797,8 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
             jb_tables[key] = html
     doc_title, sections = group_sections(blocks)
     display_title = doc_title or title
+    stage_suffix = f"（{stage_label}）" if stage_label else ""
+    report_title = f"{brand_text('report_title_prefix')}：{display_title}{stage_suffix}"
     # 正文页：同一份正文去掉全部角标/引文胶囊，输出干净正式内容（核验内容归"溯源核验报告"页）
     clean_blocks, _ = parse_answer_blocks(answer, {s["id"] for s in sources}, chip_map, strip_cites=True)
     _, clean_sections = group_sections(clean_blocks)
@@ -2764,7 +2826,7 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
 
     meta_bits = []
     if process_stats["n_searches"]:
-        # 检索计数按通道拆分显示（深度搜索/可信联网/宿主 WebSearch 是不同来源）
+        # 检索计数按通道拆分显示（检索来源/公开网络/宿主 WebSearch 是不同来源）
         _deep_n = process_stats.get("deep_routes", 0)
         _trusted_n = process_stats.get("trusted_routes", 0)
         meta_bits.append(route_summary(_deep_n, _trusted_n, process_stats["n_searches"]))
@@ -2775,11 +2837,12 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
     meta_bits.append(f"生成于 {generated}")
     meta_line = " · ".join(meta_bits)
     # 来源＝材料实际使用的检索通道（深度/可信/宿主 WebSearch，动态汇总）；
-    # 历史产物无通道信息时保留旧文案；孤立「联网」并回「深知可信搜索（联网）」
+    # 历史产物无通道信息时保留旧文案；孤立「联网」并回「溯源核验报告生成器（联网）」
     _channels = channel_tokens([s.get("channel") or "" for s in sources])
     has_external_any = any(s.get("unofficial") or s.get("pending") for s in sources)
     source_line = (" · ".join(_channels) if _channels
-                   else ("深知可信搜索（含公开网络材料）" if has_external_any else "深知可信搜索"))
+                   else (brand_text("source_fallback_external") if has_external_any
+                         else brand_text("source_fallback")))
 
     # 正文页的来源性质提示：引用了公开网络材料时，给用户一个可见、统一的标记，
     # 不暴露三阶段/检索通道；具体逐条标记仍在溯源核验报告的材料卡与引文胶囊上。
@@ -2791,16 +2854,14 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
         if cited_external else ""
     )
 
-    # 图表并入核验报告（1.4.0 一体化）：有图表数据且包内 ECharts 可用时，
-    # 图表并入核验报告（1.4.0 一体化）——交付物始终是**一个** HTML，不再另出独立图表报告。
-    # 位置按 metadata.section 锚点插进对应章节（图表跟着它展示的数据走）；锚点缺失或不匹配
-    # 才退化为核验报告单之后的独立"数据可视化"章节。资源缺失或数据不可用则整块不渲染
-    # （不出现空白图，也不阻断报告生成）。
+    # 图表并入核验报告（1.0.1 opt-in）：传 --charts-json 才画，交付物始终是**一个** HTML。
+    # 位置按 metadata.section 锚点插进对应章节；锚点缺失或不匹配才退化为独立"数据可视化"章节。
+    # 资源缺失或数据不可用则整块不渲染（不出现空白图，也不阻断报告生成）。
     charts_html = ""
     charts_script = ""
     chart_toc = ""
     charts_by_section: Dict[int, str] = {}
-    if charts_data:
+    if charts_data and (CONFIG.get("charts") or {}).get("enable", True):
         echarts_src = chart_embed.load_echarts_source()
         if not echarts_src:
             print(f"提示：未找到 {chart_embed.ECHARTS_RESOURCE}，本次不生成图表章节（报告其余部分不受影响）。",
@@ -2813,9 +2874,6 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
             chart_title = str(chart_meta.get("title") or "").strip() or "数据可视化"
             note = '<p class="chart-note">图表由已核验材料数据生成，点击图例或数据项可跳转对应来源原文。</p>'
             blocks = chart_embed.render_blocks(charts)
-            # 图表跟着它展示的数据所在的章节走（1.4.0）：metadata.section 指定章节号/标题，
-            # 命中就插进该章节正文之后；未指定或匹配不上，才退化为独立的"数据可视化"章节
-            # （放在核验报告单之后、正文之前，作为总体摘要，不再堆到报告最末尾）。
             anchor_idx = resolve_chart_anchor(sections, chart_meta.get("section"))
             if anchor_idx:
                 charts_by_section[anchor_idx] = (
@@ -2876,11 +2934,11 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
     {body_external_note}
     {render_section_cards(clean_sections, sources, id_prefix="sec")}
     </div>
-    <div class="foot">深知可信搜索 · 正文 ｜ 内容由 AI 生成，仅供参考</div>
+    <div class="foot">{esc(brand_text("footer_body"))}</div>
   </main>
 
   <main class="view" id="view-report" aria-label="溯源核验报告">
-    <h2 class="paper-title">溯源核验报告：{esc(display_title)}</h2>
+    <h2 class="paper-title">{esc(report_title)}</h2>
     {citation_warning}
     {render_process_bar(process_stats, verification)}
     {render_verify_panel(verification)}
@@ -2888,7 +2946,7 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
     <div class="doc-paper">
     {render_section_cards(sections, sources, charts_by_section, id_prefix="rsec")}
     </div>
-    <div class="foot">深知可信搜索 · 溯源核验报告 ｜ 内容由 AI 生成，仅供参考</div>
+    <div class="foot">{esc(brand_text("footer_report"))}</div>
   </main>
 
   {render_library_view(sources, display_title)}
@@ -2966,42 +3024,6 @@ def align_sources_to_answer(answer: str, sources: List[Dict[str, str]]) -> List[
     return sources
 
 
-def resolve_charts_data(value: str, run_dir: Optional[Path] = None) -> Optional[Dict[str, Any]]:
-    """解析 --charts-json：支持直接内联 JSON，也支持 run 目录内的文件名。
-
-    非法/为空一律返回 None（图表章节不渲染），绝不因此阻断核验报告生成——
-    报告的核验正文是主交付，图表是附加视图。
-    """
-    raw = (value or "").strip()
-    if not raw:
-        return None
-    try:
-        if raw.startswith("{"):
-            data = json.loads(raw)
-        else:
-            data = json.loads(_safe_input_path(raw, {".json"}, run_dir).read_text(encoding="utf-8"))
-    except (ValueError, OSError, json.JSONDecodeError) as exc:
-        print(f"提示：图表数据无法读取（{exc}），本次不生成图表章节。", file=sys.stderr)
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _next_version_path(path: Path) -> Path:
-    """输出文件已存在时不覆盖（1.4.0 起）：自动改为 原名_v2 / _v3 … 另存。
-
-    追加图表/修改答案后重跑渲染时，旧版本保留、新版本号递增——不覆盖已交付内容，
-    也不会再靠宿主目录里的 "名字 (2)" 兜底。命名与 deliver_outputs.py 的重名规则一致。
-    """
-    if not path.exists():
-        return path
-    for index in range(2, 100):
-        candidate = path.with_name(f"{path.stem}_v{index}{path.suffix}")
-        if not candidate.exists():
-            print(f"提示：{path.name} 已存在，本次输出改为 {candidate.name}（不覆盖旧版，1.4.0 起）。")
-            return candidate
-    raise SystemExit(f"错误：{path.name} 的版本号 _v2~_v99 均已占用，请清理 {path.parent} 后重试。")
-
-
 def parse_research_notes(text: str) -> Dict[str, int]:
     """统计研究资料 Markdown 的两张表行数：核心事实总表 / 数据口径表。
     按二级/三级标题分节识别，表格行以 | 开头（跳过表头与 --- 分隔行）；未识别到相应节时计 0。"""
@@ -3038,21 +3060,56 @@ def parse_research_notes(text: str) -> Dict[str, int]:
     return {"facts": facts, "calibers": calibers}
 
 
+def resolve_charts_data(value: Optional[str], run_dir: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    """解析 --charts-json：支持直接内联 JSON，也支持 run 目录内的文件名。
+
+    非法/为空一律返回 None（图表章节不渲染），绝不因此阻断核验报告生成。
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.startswith("{"):
+            data = json.loads(raw)
+        else:
+            data = json.loads(_safe_input_path(raw, {".json"}, run_dir).read_text(encoding="utf-8"))
+    except (ValueError, OSError, json.JSONDecodeError) as exc:
+        print(f"提示：图表数据无法读取（{exc}），本次不生成图表章节。", file=sys.stderr)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _prescan_config_option(argv: List[str]) -> Optional[str]:
+    """在 argparse 前预读 --config，使 argparse 描述也能用上品牌配置。"""
+    for i, arg in enumerate(argv):
+        if arg == "--config" and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith("--config="):
+            return arg.split("=", 1)[1]
+    return None
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="生成溯源核验报告 HTML（深知可信搜索）")
-    parser.add_argument("input_json", help="trusted_search.py / deep_query.py 的 --json-only 输出 JSON")
+    apply_config(load_config(_prescan_config_option(sys.argv[1:])))
+
+    parser = argparse.ArgumentParser(description=brand_text("argparse_desc"))
+    parser.add_argument("input_json", help="通用 JSON（materials 数组 + answer）。接口/merge 产物请先用 build_report_input.py 转换")
     parser.add_argument("--run", help="本次运行的独立目录（必须在 Skill 安装目录之外；相对产物落在该目录）")
-    parser.add_argument("--output", help="输出 HTML 文件名；相对名落在 --run 目录，绝对路径也必须在 Skill 目录之外。同题重跑自动 _v2 另存")
-    parser.add_argument("--title", default="溯源核验报告", help="页面标题")
+    parser.add_argument("--output", help="输出 HTML 文件名；相对名落在 --run 目录，绝对路径也必须在 Skill 目录之外。内部重跑直接覆盖同名文件（交付版本编号由 deliver_outputs 在用户目录处理）")
+    parser.add_argument("--config", help="业务 Skill 配置 JSON（品牌/通道/自检标签/双版/图表/域内核验）；不传用通用默认值")
+    parser.add_argument("--title", default=None, help="页面标题；不传用配置的 default_page_title")
     parser.add_argument("--answer-file", help="最终答案文件（关键结论带 [1][2] 角标）。复杂任务综合后必须传入，确保 HTML 展示的答案与交付一致。")
     parser.add_argument("--question", default="", help="用户原始问题，用于自动生成文件名。")
-    parser.add_argument("--question-file", help="用户原始问题全文文件（official-docs/search-results/ 内文件名或绝对路径）；多行/长问题必须用本参数传全文，禁止只传首行（1.6.0）")
-    parser.add_argument("--self-check-file", help="答案自检结果 JSON（五项：fact_basis/binding/consistency/freshness/no_gap，值写 通过/未通过：原因）；未传时核验单如实显示'未记录'。")
-    parser.add_argument("--skip-link-check", action="store_true", help="（兼容 no-op）链接活性检测已于 2026-10-08 移除，接口返回的链接原样进报告")
+    parser.add_argument("--question-file", help="用户原始问题全文文件（run 目录内文件名或绝对路径）；多行/长问题必须用本参数传全文，禁止只传首行（1.6.0）")
+    parser.add_argument("--self-check-file", help="答案自检结果 JSON（五项：fact_basis/binding/consistency/freshness/no_gap，值写 通过/未通过：原因；标签集可由配置替换）；未传时核验单如实显示'未记录'。")
+    parser.add_argument("--verify-file", help="业务 Skill 的域内核验记录 JSON（verdict/record/issues）；record 指纹与当前答案/证据不一致或 verdict=fail 时判核验未通过")
+    parser.add_argument("--charts-json", help="图表数据 JSON（run 目录内文件名或内联 JSON）；传入后图表并入本报告（一体化，不另出独立 HTML）")
+    parser.add_argument("--stage", help="双版报告阶段标识（如 outline/final），显示名由配置 stage.labels 提供；未配置则不出现后缀")
     parser.add_argument("--no-snapshot", action="store_true", help="关闭存档快照兜底展示（默认启用：原文失效时以 /A/ 修订后的存档快照回看）")
-    parser.add_argument("--charts-json", help="图表数据：official-docs/search-results/ 内的 JSON 文件名，或直接内联 JSON。传入后图表并入本报告（一体化，不另出独立 HTML）。")
     parser.add_argument("--research-notes-file", help="研究资料 Markdown（核心事实总表 + 数据口径表）；传入后 AI 自验收过程条体现整理规模，未传不显示该统计。")
     args = parser.parse_args()
+    if args.config:
+        apply_config(load_config(args.config))
 
     try:
         run_dir = resolve_run_dir(args.run) if args.run else None
@@ -3083,12 +3140,25 @@ def main() -> None:
         except OSError:
             pass
 
+    # 域内核验记录注入（--verify-file）：由业务 Skill 的核验器产出，渲染时并入核验单
+    if args.verify_file:
+        verify_path = _safe_input_path(args.verify_file, {".json"}, run_dir)
+        verify_data = json.loads(verify_path.read_text(encoding="utf-8"))
+        if isinstance(verify_data, dict):
+            unwrap(payload)["verifyRecord"] = verify_data
+
     snapshot_enabled = not args.no_snapshot
     unwrapped = unwrap(payload)
+    # 严格单输入：找不到通用材料时直接拒绝，提示改用统一入口转换（不静默产出空报告）
+    if not load_materials(unwrapped) and not load_materials(payload):
+        print("错误：输入不是通用 JSON（未找到 materials / 材料 / sources 数组）。\n"
+              "接口检索或 merge 产物请先用 build_report_input.py --adapter merged 转换为通用 JSON。",
+              file=sys.stderr)
+        raise SystemExit(2)
     final_answer = normalize_citations(answer_override) if answer_override.strip() else extract_answer(unwrapped)
 
     # 生成前硬校验：核验报告必须以可交付状态产出——无角标或角标未绑定材料均拒绝生成
-    preview_sources = extract_sources(unwrapped, skip_link_check=True, snapshot_enabled=snapshot_enabled)
+    preview_sources = extract_sources(unwrapped, snapshot_enabled=snapshot_enabled)
     preview_cited = citation_ids(final_answer)
     if preview_sources and not preview_cited:
         print(
@@ -3119,23 +3189,36 @@ def main() -> None:
         if args.output:
             output = _safe_output_path(args.output, {".html", ".htm"}, ".html", run_dir)
         else:
+            # 产物名应由 Agent 通过 --output 指定（简短、取自答案标题、无 _v2/时间戳）；
+            # 未指定时才回退问题截断式自动命名（仅兜底，不推荐）。
+            print("提示：未指定 --output，使用自动文件名。建议由 Agent 按答案标题命名"
+                  "（如「成都重庆西安养老金对比.html」，重跑仍传同名以覆盖）。", file=sys.stderr)
             output = _safe_output_path(safe_output_filename(question, generated_at), {".html", ".htm"}, ".html", run_dir)
     except RunPathError as exc:
         print(f"错误：{exc}", file=sys.stderr)
         raise SystemExit(2) from None
 
-    output = _next_version_path(output)
+    # 内部重跑直接覆盖 $RUN 内同名报告（被否掉的草稿不占版本号）；
+    # 版本编号只在**交付给用户**时由 deliver_outputs 按"目标目录已有同名且内容不同"决定。
     output.parent.mkdir(parents=True, exist_ok=True)
     research_notes = None
     if args.research_notes_file:
         _rn_path = _safe_input_path(args.research_notes_file, {".md", ".txt"}, run_dir)
         research_notes = parse_research_notes(_rn_path.read_text(encoding="utf-8"))
         print(f"研究资料统计：{research_notes['facts']} 项事实 · {research_notes['calibers']} 项口径")
+    title_text = (args.title or brand_text("default_page_title")).strip() or "溯源核验报告"
+    stage_label = ""
+    stage_cfg = CONFIG.get("stage") or {}
+    if args.stage and stage_cfg.get("enable"):
+        stage_label = str((stage_cfg.get("labels") or {}).get(args.stage) or "")
+    charts_data = resolve_charts_data(args.charts_json, run_dir) if args.charts_json else None
     output.write_text(
-        render_html(payload, args.title, answer_override=answer_override, question_override=args.question,
-                    generated_at=generated_at, skip_link_check=args.skip_link_check,
-                    snapshot_enabled=snapshot_enabled, charts_data=resolve_charts_data(args.charts_json, run_dir),
-                    research_notes=research_notes),
+        render_html(payload, title_text, answer_override=answer_override, question_override=args.question,
+                    generated_at=generated_at,
+                    snapshot_enabled=snapshot_enabled,
+                    research_notes=research_notes,
+                    charts_data=charts_data,
+                    stage_label=stage_label),
         encoding="utf-8")
     print(f"已生成：{output}")
 

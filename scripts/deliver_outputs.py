@@ -380,8 +380,9 @@ def copy_without_overwrite(src: Path, dest: Path) -> dict:
     """复制文件到目标目录，绝不覆盖已有同名文件。
 
     内容相同 → 跳过（skipped=identical）；内容不同 → 依次尝试"名字_v2.扩展名"
-    （_v3、_v4…）另存（renamed=true）。新文件直接复制。命名与 render_trace_html 的
-    版本化输出规则一致（1.4.0 统一，替代原"名字 (2)"）。
+    （_v3、_v4…）另存（renamed=true）。新文件直接复制。
+    交付层是**唯一**的版本编号位置（2026-11-23 起）：run 目录内部重跑直接覆盖，
+    被否掉的草稿不占编号；只有已经交付给用户的版本再次交付且内容不同才编 _v2。
     """
     target = dest / src.name
     # is_symlink 单独判定：断链软链接的 exists() 为假，copy2 会顺着链接写到目标之外

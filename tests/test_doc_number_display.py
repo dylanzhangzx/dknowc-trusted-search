@@ -71,13 +71,18 @@ s = source({
 })
 check("文号 优先", s["doc_number"] == "粤府〔2026〕1号", s["doc_number"])
 
-# 5) policyFiles 兜底仍工作：文章无文号时从 writtenText 回填
-article = {"文章标题": "某政策通知", "段落": [{"内容": "正文。"}]}
-r.attach_doc_numbers([article], {"content": {"data": {"policyFiles": [
-    {"title": "某政策通知", "writtenText": "粤府〔2026〕2号"}
-]}}})
-check("policyFiles 兜底回填", article.get("文号") == "粤府〔2026〕2号", str(article.get("文号")))
-check("兜底后渲染器可见", source(article)["doc_number"] == "粤府〔2026〕2号", source(article)["doc_number"])
+# 5) policyFiles 兜底（1.8.1 起由入口适配器完成）：文章无文号时从 writtenText 回填
+import build_report_input as bri  # noqa: E402
+merged_payload = {"content": {"data": {
+    "检索文章": [{"文章标题": "某政策通知", "段落": [{"内容": "正文。"}]}],
+    "policyFiles": [{"title": "某政策通知", "writtenText": "粤府〔2026〕2号"}],
+}}}
+material = bri.map_merged_article(bri.find_merged_articles(merged_payload)[0])
+filled = bri.apply_policy_files([material], merged_payload)
+check("policyFiles 兜底回填", filled == 1 and material.get("发文字号") == "粤府〔2026〕2号",
+      str(material.get("发文字号")))
+check("兜底后渲染器可见", source(material)["doc_number"] == "粤府〔2026〕2号",
+      source(material)["doc_number"])
 
 print(f"\n结果：{passed} 通过，{failed} 失败")
 raise SystemExit(0 if failed == 0 else 1)

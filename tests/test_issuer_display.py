@@ -13,7 +13,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import merge_search_results as m  # noqa: E402
-import render_trace_html as r  # noqa: E402
+import build_trace_input as bt  # noqa: E402
+import build_report_input as bri  # noqa: E402
+from source_display import source_identity  # noqa: E402
 
 passed = 0
 failed = 0
@@ -30,7 +32,9 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 
 
 def source(item: dict) -> dict:
-    return r.source_from_article(item, 1)
+    """1.8.1：展示口径由 source_display 计算，经 build_trace_input 写入通用材料「发布机构」。"""
+    agency, data_source, issuer, is_policy = source_identity(item)
+    return {"agency": agency, "data_source": data_source, "issuer": issuer, "is_policy": is_policy}
 
 
 # 1) V2 政策：发文机构优先，不显示数据源
@@ -135,6 +139,20 @@ s = source({
 })
 check("policy_news 不判政策", s["is_policy"] is False, str(s["is_policy"]))
 check("policy_news 显示公开网站", s["agency"] == "公开网站", s["agency"])
+
+# 10) 适配器集成：merge 文章经 build_trace_input 写入展示机构与政策类型
+article = m._to_article({
+    "文章标题": "广东省创业担保贷款实施办法",
+    "文章类型": "policy",
+    "发布或实施机构": "广东省人力资源和社会保障厅##、广东省财政厅##",
+    "段落": [{"内容": "第一条 为支持创业带动就业……"}],
+})
+materials = [bri.map_merged_article(article)]
+bt.enrich_materials(materials, [article])
+check("适配器写入展示机构",
+      materials[0].get("发布机构") == "广东省人力资源和社会保障厅、广东省财政厅",
+      str(materials[0].get("发布机构")))
+check("适配器标记政策类型", materials[0].get("素材类型") == "policy", str(materials[0].get("素材类型")))
 
 print(f"\n结果：{passed} 通过，{failed} 失败")
 raise SystemExit(0 if failed == 0 else 1)

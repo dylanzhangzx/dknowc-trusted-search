@@ -8,6 +8,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import render_trace_html as rt  # noqa: E402
+import build_report_input as bri  # noqa: E402
+import build_trace_input as bt  # noqa: E402
 
 passed = 0
 failed = 0
@@ -40,7 +42,9 @@ def make_article(cid, title, used=True):
 def main():
     articles = [make_article(1, "职工带薪年休假条例"), make_article(2, "劳动法"),
                 make_article(3, "未引用的参考材料", used=False)]
-    payload = {"content": {"data": {"检索文章": articles}}}
+    # 1.8.1：接口形态先经入口适配器映射为通用 materials（含本产品展示口径与未引用标记）
+    payload = {"materials": bt.enrich_materials(
+        [bri.map_merged_article(a) for a in articles], articles)}
     answer = "职工连续工作1年以上的享受年休假[1]，工资照发[2]。"
     html = rt.render_html(payload, "测试报告", answer_override=answer)
 

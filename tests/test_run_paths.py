@@ -35,7 +35,7 @@ def main():
     out1.write_text("first", encoding="utf-8")
     out2 = resolve_output_path("report.html", run, {".html"}, ".html", "报告.html")
     check("首次产物落在 run 目录", out1.parent == run)
-    check("重复运行自动 _v2，不覆盖", out2.name == "report_v2.html", out2.name)
+    check("内部重跑覆盖同名文件（交付层才编号）", out2.name == "report.html", out2.name)
 
     t_out = trusted_search.resolve_output_json("search.json", run)
     d_out = deep_query.resolve_output_json("deep.json", run)

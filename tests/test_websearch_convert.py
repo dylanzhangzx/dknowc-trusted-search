@@ -42,6 +42,28 @@ def articles(payload, **kwargs):
     return wc.convert(payload, **kwargs)["content"]["data"]["检索文章"]
 
 
+def render_report(source_name, answer_name, out_name):
+    """1.8.1：先经本产品入口适配器生成通用 JSON，再渲染（渲染器只认通用 JSON）。"""
+    prep = subprocess.run([
+        sys.executable, str(SCRIPTS / "build_trace_input.py"), source_name,
+        "--run", str(RESULTS), "--output", "test_ws_input.json",
+    ], capture_output=True, text=True)
+    if prep.returncode != 0:
+        raise RuntimeError(prep.stdout + prep.stderr)
+    out_html = RESULTS / out_name
+    out_html.unlink(missing_ok=True)
+    proc = subprocess.run([
+        sys.executable, str(SCRIPTS / "render_trace_html.py"), "--run", str(RESULTS), "test_ws_input.json",
+        "--config", str(SKILL / "config" / "trace_report.config.json"),
+        "--answer-file", answer_name,
+        "--self-check-file", "test_ws_render_selfcheck.json",
+        "--question", "测试", "--output", out_name,
+    ], capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stdout + proc.stderr)
+    return out_html
+
+
 def run_cli(args, stdin_text=None):
     proc = subprocess.run([sys.executable, str(SCRIPTS / "websearch_convert.py"), "--run", str(RESULTS)] + args,
                           input=stdin_text, text=True, capture_output=True)
@@ -531,17 +553,8 @@ def main():
         (RESULTS / "test_ws_render_selfcheck.json").write_text(json.dumps({
             "fact_basis": "通过：测试", "binding": "通过：测试", "consistency": "通过：测试",
             "freshness": "通过：测试", "no_gap": "通过：测试"}, ensure_ascii=False), encoding="utf-8")
-        out_html = RESULTS / "test_ws_render.html"
-        out_html.unlink(missing_ok=True)
-        proc = subprocess.run([
-            sys.executable, str(SCRIPTS / "render_trace_html.py"), "--run", str(RESULTS), "test_ws_render_merged.json",
-            "--answer-file", "test_ws_render_answer.txt",
-            "--self-check-file", "test_ws_render_selfcheck.json",
-            "--question", "测试", "--output", "test_ws_render.html",
-        ], capture_output=True, text=True)
-        if proc.returncode != 0:
-            raise RuntimeError(proc.stdout + proc.stderr)
-        html = out_html.read_text(encoding="utf-8")
+        html = render_report("test_ws_render_merged.json", "test_ws_render_answer.txt",
+                             "test_ws_render.html").read_text(encoding="utf-8")
         check("阶段二外部材料触发正文提示条", "本页部分材料来自公开网络" in html)
         check("阶段二外部材料触发知识专库页脚", "部分材料来自公开网络" in html)
         check("阶段二外部材料触发自验收文案", "仅非官方来源" in html and "核验未通过" in html)
@@ -555,17 +568,8 @@ def main():
                      ("test_ws_external_noauth.json", "公开资料补充")])
         (RESULTS / "test_ws_render_answer.txt").write_text("# 测试\n\n官方原文段落[1]。\n", encoding="utf-8")
         write("test_ws_render_official.json", d2)
-        out2 = RESULTS / "test_ws_render_official.html"
-        out2.unlink(missing_ok=True)
-        proc = subprocess.run([
-            sys.executable, str(SCRIPTS / "render_trace_html.py"), "--run", str(RESULTS), "test_ws_render_official.json",
-            "--answer-file", "test_ws_render_answer.txt",
-            "--self-check-file", "test_ws_render_selfcheck.json",
-            "--question", "测试", "--output", "test_ws_render_official.html",
-        ], capture_output=True, text=True)
-        if proc.returncode != 0:
-            raise RuntimeError(proc.stdout + proc.stderr)
-        html2 = out2.read_text(encoding="utf-8")
+        html2 = render_report("test_ws_render_official.json", "test_ws_render_answer.txt",
+                              "test_ws_render_official.html").read_text(encoding="utf-8")
         check("库内无权威字段渲染后无正文提示条", "本页部分材料来自公开网络" not in html2)
         check("库内无权威字段渲染后无非官方徽标", "非官方来源" not in html2)
 
@@ -582,17 +586,8 @@ def main():
         write("test_ws_render_uncitable.json", uncitable_merged)
         (RESULTS / "test_ws_uncitable_answer.txt").write_text(
             "# 测试\n\n## 一、现行依据\n\n测试结论[1]。\n", encoding="utf-8")
-        out3 = RESULTS / "test_ws_render_uncitable.html"
-        out3.unlink(missing_ok=True)
-        proc = subprocess.run([
-            sys.executable, str(SCRIPTS / "render_trace_html.py"), "--run", str(RESULTS), "test_ws_render_uncitable.json",
-            "--answer-file", "test_ws_uncitable_answer.txt",
-            "--self-check-file", "test_ws_render_selfcheck.json",
-            "--question", "测试", "--output", "test_ws_render_uncitable.html",
-        ], capture_output=True, text=True)
-        if proc.returncode != 0:
-            raise RuntimeError(proc.stdout + proc.stderr)
-        html3 = out3.read_text(encoding="utf-8")
+        html3 = render_report("test_ws_render_uncitable.json", "test_ws_uncitable_answer.txt",
+                              "test_ws_render_uncitable.html").read_text(encoding="utf-8")
         check("不可引用材料章节不标已核验",
               "本章引用 1 处 · 1 条引用未通过" in html3 and "本章引用 1 处 · 已核验" not in html3)
         check("不可引用材料卡片明确标注", "不可引用" in html3)
