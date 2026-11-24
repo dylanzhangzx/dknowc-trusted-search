@@ -118,7 +118,8 @@ def main() -> int:
             print(f"错误：自检文件无法读取（{exc}）", file=sys.stderr)
             return 2
     else:
-        self_check = source_meta.get("selfCheck") or source_meta.get("self_check")
+        self_check = (source_meta.get("selfCheck") or source_meta.get("self_check")
+                     or source_meta.get("agentCheck") or source_meta.get("agent_check"))
 
     verify_record: Any = None
     if args.verify_file:

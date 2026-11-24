@@ -239,38 +239,45 @@ def _read_update_cache():
         return None
 
 
-def _write_update_cache(latest, download_url, download_name):
-    # 原子写（临时文件＋replace）＋0600 权限，避免半截缓存与权限放大；保留已记录的拒绝版本
+def _write_cache_text(text: str) -> None:
+    """直接覆盖写缓存（1.8.2 整改）。
+
+    原先用「临时文件 + os.replace」：宿主（WorkBuddy）会把 rename 的源文件判成
+    "删除文件"并弹确认框——初始化是每次调用 skill 的第一步，用户每次都会看到
+    "删除 update_check.json.tmp 需要确认"，误以为 skill 在删东西，影响判断。
+    缓存只有版本号/下载地址/拒绝版本，损坏时读取端（_read_update_cache）已按
+    "无缓存"容错，直接落盘即可；文件 0600（无密钥，权限收紧只是习惯）。
+    """
+    path = _update_cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
     try:
-        path = _update_cache_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def _write_update_cache(latest, download_url, download_name):
+    try:
         old = _read_update_cache() or {}
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps({
+        _write_cache_text(json.dumps({
             "checked_at": time.time(),
             "latest_version": latest,
             "download_url": download_url,
             "download_name": download_name,
             "declined_version": old.get("declined_version"),
-        }, ensure_ascii=False), encoding="utf-8")
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
+        }, ensure_ascii=False))
     except Exception:
         pass
 
 
 def set_declined_version(version) -> bool:
-    """记录用户拒绝的版本（原子合并写入，保留既有字段）。被拒版本不再提示，
+    """记录用户拒绝的版本（合并写入，保留既有字段）。被拒版本不再提示，
     目录出现更高版本时恢复提示；用户主动要求升级时不受此记录影响。"""
     try:
-        path = _update_cache_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         data = _read_update_cache() or {}
         data["declined_version"] = str(version)
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
+        _write_cache_text(json.dumps(data, ensure_ascii=False))
         return True
     except Exception:
         return False

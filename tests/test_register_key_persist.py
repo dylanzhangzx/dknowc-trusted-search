@@ -70,8 +70,12 @@ def main() -> int:
     source = SCRIPT.read_text(encoding="utf-8")
     check("注册输出固定 apiKey:null（不再回退明文）", "apiKey: null" in source)
     check("旧明文回退路径已移除", "apiKey: cfgWrite.written ? null : apiKeyToSave" not in source)
-    check("落盘使用临时文件+rename", "renameSync(tmpPath, filePath)" in source)
-    check("落盘显式 chmod 0600", "chmodSync(tmpPath, 0o600)" in source)
+    # 1.8.2 整改：宿主把 rename 的源文件判成"删除文件"并弹确认，改为先收紧权限再覆写
+    check("落盘不再用临时文件+rename", "renameSync(tmpPath" not in source
+          and "unlinkSync(tmpPath" not in source, source[:0])
+    check("写入前收紧旧文件权限", "existsSync(filePath)) fs.chmodSync(filePath, 0o600)" in source)
+    check("落盘显式 chmod 0600", "chmodSync(filePath, 0o600)" in source)
+    check("清除题目状态不删除文件", "unlinkSync(stateFilePath" not in source)
     check("落盘失败+新Key失败话术不矛盾",
           "userMessage += cfgWrite.written" in source and "当前密钥也未安全落盘" in source)
 

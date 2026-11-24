@@ -1,5 +1,11 @@
 # 更新日志
 
+## 1.8.2-skills-sh - 2026-11-24
+
+- 同步母版 `1.8.2`：两轨判定（结构核验 ∧ AI 验收，任一不过不出报告）；脚本只判结构、内容归 AI；`claim_audit.py` 已删除；来源等级与「公开网络·官方」口径；注册默认一步发码（注册通行码通道，失败回落三步）；本机状态文件 `maas_registration_session.json`；版本缓存直接覆盖写；渲染门禁 exit 1。
+- 渠道化沿用既有规则：skills.sh注册渠道码 `8C8D411C-6A46-4E99-887D-87D9A1329930`，slug `dknowc-trusted-search-skills-sh`，attribution channel `skills-sh`；脚本层 skillhub 清零；包内不含 tests/README/CHANGE_log/check_release 与运行产物。
+
+
 ## 1.8.1-skills-sh - 2026-11-23
 
 - 同步母版 `1.8.1`：内置「溯源核验报告生成器 1.0.1」内核（config、`build_report_input.py`、`trust_digest.py`、`chart_embed.py`、ECHARTS-NOTICE）；新增本产品入口 `scripts/build_trace_input.py`；渲染器严格单输入（materials）。

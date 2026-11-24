@@ -12,29 +12,85 @@
     "default_page_title": "溯源核验报告"
   },
   "channels": {
-    "route_keywords": {"web": ["WebSearch", "宿主"], "deep": ["深度"], "trusted": ["可信"]},
-    "labels": {"deep": "深度搜索", "trusted": "可信搜索"},
+    "route_keywords": {
+      "web": [
+        "WebSearch",
+        "宿主"
+      ],
+      "deep": [
+        "深度"
+      ],
+      "trusted": [
+        "可信"
+      ]
+    },
+    "labels": {
+      "deep": "深度搜索",
+      "trusted": "可信搜索"
+    },
     "summary": {
       "deep": "深度搜索 {deep} 路",
       "trusted": "可信补搜 {trusted} 次",
       "fallback": "深知检索 {n} 路"
     },
     "step1_fallback": "深知检索",
-    "internal_token_filter": ["联网", "可信联网", "宿主 WebSearch"],
-    "tokens": {"深知可信搜索·联网": "深知可信搜索"},
+    "internal_token_filter": [
+      "联网",
+      "可信联网",
+      "宿主 WebSearch"
+    ],
+    "tokens": {
+      "深知可信搜索·联网": "深知可信搜索"
+    },
     "user_facing_replacements": [
-      ["宿主 WebSearch", "公开网络检索"],
-      ["外部联网材料", "公开网络材料"],
-      ["外部联网", "公开网络"],
-      ["可信联网", "可信搜索"],
-      ["阶段三", "补充检索"],
-      ["阶段二", "补充检索"],
-      ["阶段一", "检索"],
-      ["非官方来源 · 待核验", "非官方来源"],
-      ["（非官方来源，待核验）", "（非官方来源）"],
-      ["(非官方来源，待核验)", "(非官方来源)"],
-      ["非官方来源/待核验", "非官方来源"],
-      ["非官方来源、待核验", "非官方来源"]
+      [
+        "宿主 WebSearch",
+        "公开网络检索"
+      ],
+      [
+        "外部联网材料",
+        "公开网络材料"
+      ],
+      [
+        "外部联网",
+        "公开网络"
+      ],
+      [
+        "可信联网",
+        "可信搜索"
+      ],
+      [
+        "阶段三",
+        "补充检索"
+      ],
+      [
+        "阶段二",
+        "补充检索"
+      ],
+      [
+        "阶段一",
+        "检索"
+      ],
+      [
+        "非官方来源 · 待核验",
+        "非官方来源"
+      ],
+      [
+        "（非官方来源，待核验）",
+        "（非官方来源）"
+      ],
+      [
+        "(非官方来源，待核验)",
+        "(非官方来源)"
+      ],
+      [
+        "非官方来源/待核验",
+        "非官方来源"
+      ],
+      [
+        "非官方来源、待核验",
+        "非官方来源"
+      ]
     ]
   },
   "selfcheck": {
@@ -46,7 +102,18 @@
       "no_gap": "无未核验断言"
     }
   },
-  "stage": {"enable": false},
-  "charts": {"enable": true},
-  "verify": {"enabled": true, "required": false}
+  "stage": {
+    "enable": false
+  },
+  "charts": {
+    "enable": true
+  },
+  "verify": {
+    "enabled": true,
+    "required": false
+  },
+  "agent_track": {
+    "enabled": true,
+    "require_evidence": true
+  }
 }

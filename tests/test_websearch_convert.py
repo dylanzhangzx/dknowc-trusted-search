@@ -551,13 +551,14 @@ def main():
         write("test_ws_render_merged.json", render_merged)
         (RESULTS / "test_ws_render_answer.txt").write_text("# 测试\n\n测试外部段落[1]。\n", encoding="utf-8")
         (RESULTS / "test_ws_render_selfcheck.json").write_text(json.dumps({
-            "fact_basis": "通过：测试", "binding": "通过：测试", "consistency": "通过：测试",
-            "freshness": "通过：测试", "no_gap": "通过：测试"}, ensure_ascii=False), encoding="utf-8")
+            "fact_basis": "通过：[1] 已核对", "binding": "通过：[1] 已绑定",
+            "consistency": "通过：test_ws_render_answer.txt", "freshness": "通过：2025-11 发布",
+            "no_gap": "通过：[1] 无缺口"}, ensure_ascii=False), encoding="utf-8")
         html = render_report("test_ws_render_merged.json", "test_ws_render_answer.txt",
                              "test_ws_render.html").read_text(encoding="utf-8")
         check("阶段二外部材料触发正文提示条", "本页部分材料来自公开网络" in html)
         check("阶段二外部材料触发知识专库页脚", "部分材料来自公开网络" in html)
-        check("阶段二外部材料触发自验收文案", "仅非官方来源" in html and "核验未通过" in html)
+        check("阶段二外部材料触发自验收文案", "结构核验" in html and "非官方来源" in html)
         check("材料级核验字段过滤内部词",
               "宿主 WebSearch" not in html and "阶段三" not in html and "外部联网" not in html)
         check("外部材料只标非官方来源", "非官方来源" in html and "非官方来源 · 待核验" not in html)
@@ -586,13 +587,15 @@ def main():
         write("test_ws_render_uncitable.json", uncitable_merged)
         (RESULTS / "test_ws_uncitable_answer.txt").write_text(
             "# 测试\n\n## 一、现行依据\n\n测试结论[1]。\n", encoding="utf-8")
-        html3 = render_report("test_ws_render_uncitable.json", "test_ws_uncitable_answer.txt",
-                              "test_ws_render_uncitable.html").read_text(encoding="utf-8")
-        check("不可引用材料章节不标已核验",
-              "本章引用 1 处 · 1 条引用未通过" in html3 and "本章引用 1 处 · 已核验" not in html3)
-        check("不可引用材料卡片明确标注", "不可引用" in html3)
-        check("交付前检查联动失败", "交付前检查 5/" in html3 and "依据可用性" in html3)
-        check("不可引用材料整体核验失败", "核验未通过" in html3)
+        # 1.8.2：不可引用属结构不合格 → 拦在门口，不生成 HTML；错误信息须点明原因
+        try:
+            render_report("test_ws_render_uncitable.json", "test_ws_uncitable_answer.txt",
+                          "test_ws_render_uncitable.html")
+            check("不可引用材料阻止出报告", False, "未拦截")
+        except RuntimeError as exc:
+            msg = str(exc)
+            check("不可引用材料阻止出报告", "核验未通过" in msg and "不可引用" in msg, msg[:200])
+        check("不可引用材料未产出文件", not (RESULTS / "test_ws_render_uncitable.html").exists())
 
         # 五验待确认项：同一分组标签对应多条 --input 时，过程条增量必须汇总
         stats_same_label = rt.compute_process_stats(

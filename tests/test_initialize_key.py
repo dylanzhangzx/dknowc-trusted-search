@@ -168,6 +168,26 @@ def main():
         init.check_api_key_config, init.check_update = old_check_api, old_check_update
         init._resolve_key_value, init._verify_key = old_resolve, old_verify
 
+    # 1.8.2：版本缓存直接落盘，不再用「临时文件 + replace」（宿主会弹"删除 .tmp 需要确认"）
+    import tempfile
+    old_cfg_dir = init._dknowc_config_dir
+    try:
+        with tempfile.TemporaryDirectory(prefix="dknowc_cache_test_") as td:
+            init._dknowc_config_dir = lambda: Path(td)
+            init._write_update_cache("1.8.3", "https://oss.example/x.zip", "x.zip")
+            cache = Path(td) / "update_check.json"
+            check("缓存直接写成正式文件", cache.exists())
+            check("不残留 .tmp 临时文件", not list(Path(td).glob("*.tmp")))
+            data = json.loads(cache.read_text(encoding="utf-8"))
+            check("缓存字段完整", data.get("latest_version") == "1.8.3" and data.get("download_name") == "x.zip")
+            check("缓存文件权限 600", (cache.stat().st_mode & 0o777) == 0o600,
+                  oct(cache.stat().st_mode & 0o777))
+    finally:
+        init._dknowc_config_dir = old_cfg_dir
+    src = (ROOT / "scripts" / "initialize.py").read_text(encoding="utf-8")
+    check("初始化源码不用 os.replace", "os.replace(" not in src)
+    check("初始化源码不清理 .tmp", "unlink" not in src)
+
     print(f"\n结果：{passed} 通过，{failed} 失败")
     return 0 if failed == 0 else 1
 
