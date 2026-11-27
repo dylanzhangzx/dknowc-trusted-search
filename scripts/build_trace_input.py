@@ -158,6 +158,8 @@ def main() -> int:
     output.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"已生成通用 JSON：{output}")
     print(f"  材料 {len(materials)} 条 · 答案 {len(answer)} 字")
+    # 跨平台闸门标记（1.8.3）：判据 = 退出码 0 且输出含 [GATE-PASS]（零输出≠通过）
+    print("[GATE-PASS] build_trace_input: 通用 JSON 已生成")
     return 0
 
 

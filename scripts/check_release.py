@@ -152,7 +152,8 @@ def main():
         print("发布检查失败：发现不应进入 SkillHub 公开包的内容")
         print("\n".join(findings))
         raise SystemExit(1)
-    print("发布检查通过：未发现真实配置、API Key 或本地生成物")
+    # 跨平台闸门标记（1.8.3）：判据 = 退出码 0 且输出含 [GATE-PASS]（零输出≠通过）
+    print("[GATE-PASS] check_release: 发布检查通过，未发现真实配置、API Key 或本地生成物")
 
 
 if __name__ == "__main__":

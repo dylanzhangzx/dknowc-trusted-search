@@ -431,6 +431,12 @@ def main():
         "maas_platform_url": MAAS_PLATFORM_URL,
     }, ensure_ascii=False, indent=2))
 
+    # 跨平台闸门标记（1.8.3）：Windows 的 python3 是商店占位符、零输出≠就绪。
+    # 判据 = 退出码 0 且输出含 [GATE-PASS]（见 SKILL.md「命令约定（跨平台）」）。
+    # 标记绑定 ready 语义：环境未就绪时只输出 JSON、不打标。
+    if not blocking_issues:
+        print("[GATE-PASS] initialize: 环境就绪")
+
 
 if __name__ == "__main__":
     main()

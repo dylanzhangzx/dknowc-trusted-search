@@ -115,5 +115,8 @@
   "agent_track": {
     "enabled": true,
     "require_evidence": true
-  }
+  },
+  "official_host_allow": [
+    "mpfa.org.hk"
+  ]
 }

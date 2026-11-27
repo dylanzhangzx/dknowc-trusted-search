@@ -74,8 +74,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             "no_gap": "无未核验断言",
         }
     },
-    # 1.8.2 两轨验收：Agent 轨要求"结论 + 可回查证据"；关掉 require_evidence 退回 1.8.1 行为
+    # 1.0.2 两轨验收：Agent 轨要求"结论 + 可回查证据"；关掉 require_evidence 退回 1.0.1 行为
     "agent_track": {"enabled": True, "require_evidence": True},
+    # 官方外部信源白名单（1.0.2 配置化）：法定机构自有域名，政府域名之外的第二条官方判据。
+    # 业务 Skill 可在 config 里增删（如属地公积金局/立法会等）。
+    "official_host_allow": ["mpfa.org.hk"],
     "stage": {"enable": False, "labels": {}},
     "charts": {"enable": True},
     "verify": {"enabled": True, "required": False, "compare_digests": True},
@@ -367,14 +370,24 @@ def content_segments(item: Dict[str, Any]) -> List[Dict[str, str]]:
 
 
 # ============================================================
-# 1.8.2 来源等级：官方外部信源（政府域名/法定机构）不算"非官方"
+# 来源等级：官方外部信源（政府域名/法定机构）不算"非官方"
 # ============================================================
 OFFICIAL_HOST_RE = re.compile(r"(^|\.)gov(\.|$)", re.I)
 # 法定机构自有域名（非 .gov 后缀）：按机构白名单判定，避免把官方页误标"非官方来源"。
-# 例：香港積金局（强积金管理局）官网为 mpfa.org.hk，MPF 题实测曾被整页判成非官方。
+# 1.0.2 起白名单可由 config 的 official_host_allow 覆盖（默认仍为此常量）。
 OFFICIAL_HOST_ALLOW = ("mpfa.org.hk",)
+
+
+def official_host_allow() -> Tuple[str, ...]:
+    """官方外部信源白名单（法定机构自有域名），config 可覆盖。"""
+    values = CONFIG.get("official_host_allow")
+    if isinstance(values, (list, tuple)):
+        cleaned = tuple(str(v).strip().lower() for v in values if str(v).strip())
+        if cleaned:
+            return cleaned
+    return OFFICIAL_HOST_ALLOW
 # 机构名判据：必须以机关后缀结尾（避免"外部站""编辑部"这类词误判为官方）。
-# 发布机构字段用全表；标题判据用收窄表（1.8.2 审核观察②整改）——去掉"局/厅/署"单字后缀，
+# 发布机构字段用全表；标题判据用收窄表——去掉"局/厅/署"单字后缀，
 # 媒体标题（"XX税务局通报…"发在媒体站）不再被单字"局"误判官方；"管理局/总局/金管局"
 # 等多字机关词与法定机构专名仍有效。
 OFFICIAL_ORG_RE = re.compile(
@@ -396,7 +409,7 @@ def is_official_external(url: str, issuer: str = "", title: str = "") -> bool:
     except Exception:
         host = ""
     if host and (OFFICIAL_HOST_RE.search(host) or host.endswith((".gov.cn", ".gov.hk", ".gov.mo"))
-                 or any(host == d or host.endswith("." + d) for d in OFFICIAL_HOST_ALLOW)):
+                 or any(host == d or host.endswith("." + d) for d in official_host_allow())):
         return True
     for text, org_re in ((issuer or "", OFFICIAL_ORG_RE), (title or "", OFFICIAL_ORG_TITLE_RE)):
         # 去掉末尾空白与括号（"…（積金局）"要能按机构名判定），再做机关后缀匹配
@@ -499,7 +512,7 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
         or str(item.get("数据权威性") or item.get("authority") or "").strip() in ("非权威", "non-authoritative")
     )
     source["pending"] = bool(item.get("待核验") or item.get("pending"))
-    # 1.8.2：外部信源再判等级——官方外部（政府域名/法定机构）不作"非官方"处理。
+    # 1.0.2：外部信源再判等级——官方外部（政府域名/法定机构）不作"非官方"处理。
     _issuer_text = str(source.get("issuer") or "")
     _title_text = str(source.get("title") or "")
     source["official_external"] = bool(source["unofficial"]
@@ -519,14 +532,14 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
     source["snapshot"] = first_str(item.get("快照链接"), item.get("snapshot"), item.get("screenShotPath"))
     # 发布日期可信度（实测：「高」=模型治理入库、标题模型精抽；「较高」=门户抓取、标题规则提取）
     source["conf"] = first_str(item.get("发布日期可信度"), item.get("可信度"), item.get("confidence"))
-    # 材料类型只用于卡片左侧色条（内部样式），不再作为文字标签展示，也不再参与统计。
+    # 材料类型只用于卡片左侧色条（内部样式），不再作为文字标签展示，也不再参与统计（1.0.2）。
     key, _label, css = normalize_kind(source["kind"])
     source["type_key"] = key
     source["type_css"] = css
     live_url = bool(source["url"] and source["url"] != "接口未返回")
     source["has_link"] = live_url or bool(source["policy_url"]) or bool(source["snapshot"])
     # 核验状态只看结构：摘录可比对且材料可引用。原文链接死活与快照有无是回看通道问题，
-    # 不影响核验结论；"引用是否被百度核验通过"这类内容判断不由脚本采信（1.8.2 归 AI 轨）。
+    # 不影响核验结论；"引用是否被核验通过"这类内容判断不由脚本采信（1.0.2 归 AI 轨）。
     source["verified"] = bool(source["excerpt"]) and source["citable"]
     return source
 
@@ -644,7 +657,7 @@ def classify_check_value(raw: Any) -> Tuple[str, str]:
 
 
 # ============================================================
-# 1.8.2 两轨验收：Agent 轨（标准由我们定义，Agent 提交结论与证据）
+# 两轨验收：Agent 轨（标准由我们定义，Agent 提交结论与证据）
 # ============================================================
 # 可核对要素：材料编号、条款号、文号、日期、标准号——任一项即可回查。
 CHECKABLE_PATTERNS = (
@@ -653,8 +666,8 @@ CHECKABLE_PATTERNS = (
     re.compile(r"§\s*\d+"),
     re.compile(r"〔\s*20\d{2}\s*〕"),
     re.compile(r"20\d{2}\s*[-/.年]\s*\d{1,2}"),
-    re.compile(r"20\d{2}\s*年"),                  # 年份级引用（如"2023 年度办法"）
-    re.compile(r"[A-Za-z0-9_./-]+\.(?:json|txt|md|html|csv)", re.I),  # 文件名/路径
+    re.compile(r"20\d{2}\s*年"),
+    re.compile(r"[A-Za-z0-9_./-]+\.(?:json|txt|md|html|csv)", re.I),
     re.compile(r"GB(?:/T)?\s*\d+", re.I),
 )
 
@@ -669,12 +682,28 @@ def agent_track_config() -> Dict[str, Any]:
     return dict(CONFIG.get("agent_track") or {})
 
 
+def _normalize_verdict(raw: Any) -> str:
+    text = str(raw or "").strip().lower()
+    if not text:
+        return "none"
+    for prefix in ("pending", "待定", "待确认", "待人工复核", "待复核"):
+        if text.startswith(prefix):
+            return "pending"
+    for prefix in ("fail", "未通过", "不通过", "不合格", "false", "否", "✗", "no"):
+        if text.startswith(prefix):
+            return "fail"
+    for prefix in ("pass", "已通过", "通过", "合格", "ok", "true", "是", "✓", "yes"):
+        if text.startswith(prefix):
+            return "pass"
+    return "none"
+
+
 def parse_agent_check(raw: Any, require_evidence: bool = True) -> Dict[str, Any]:
     """把一项（Agent 轨）自检解析为结构化结果。
 
     支持新旧两种写法：
-    - 旧：`"通过：七类通道逐条挂在…（沪府规〔2025〕8号第五条）"`（兼容 1.8.1 及以前）
-    - 新：`{"verdict": "pass|fail|pending", "basis": "…", "evidence": ["[10] …第五条"]}`
+    - 旧：`"通过：说明文字"`（字符串，兼容 1.0.1 及以前）
+    - 新：`{"verdict": "pass|fail|pending", "basis": "…", "evidence": ["[1] …第五条"]}`
     返回 status ∈ pass / fail / pending / none / evidence_missing。
     """
     verdict = "none"
@@ -698,17 +727,11 @@ def parse_agent_check(raw: Any, require_evidence: bool = True) -> Dict[str, Any]
     if not evidence and basis:
         evidence = [basis]
 
-    if verdict == "pending":
-        return {"verdict": "pending", "status": "pending", "basis": basis,
-                "evidence": evidence, "missing": ""}
-    if verdict == "none":
-        return {"verdict": "none", "status": "none", "basis": basis,
-                "evidence": evidence, "missing": ""}
-    if verdict == "fail":
-        return {"verdict": "fail", "status": "fail", "basis": basis,
+    if verdict in ("pending", "none", "fail"):
+        return {"verdict": verdict, "status": verdict, "basis": basis,
                 "evidence": evidence, "missing": ""}
 
-    # verdict = pass：必须有可核对证据，否则只作"证据不足"，不计通过（1.8.2 收紧）
+    # verdict = pass：必须有可核对证据，否则只作"证据不足"，不计通过
     if require_evidence:
         joined = "；".join(evidence)
         if not joined.strip() or not has_checkable_element(joined):
@@ -717,22 +740,6 @@ def parse_agent_check(raw: Any, require_evidence: bool = True) -> Dict[str, Any]
                     "missing": "证据不足：未给出材料编号/条款号/文号/日期/标准号等可回查要素"}
     return {"verdict": "pass", "status": "pass", "basis": basis,
             "evidence": evidence, "missing": ""}
-
-
-def _normalize_verdict(raw: Any) -> str:
-    text = str(raw or "").strip().lower()
-    if not text:
-        return "none"
-    for prefix in ("pending", "待定", "待确认", "待人工复核", "待复核"):
-        if text.startswith(prefix):
-            return "pending"
-    for prefix in ("fail", "未通过", "不通过", "不合格", "false", "否", "✗", "no"):
-        if text.startswith(prefix):
-            return "fail"
-    for prefix in ("pass", "已通过", "通过", "合格", "ok", "true", "是", "✓", "yes"):
-        if text.startswith(prefix):
-            return "pass"
-    return "none"
 
 
 # 用户可见报告不得暴露内部检索实现（三阶段/联网通道）；自检说明里模型常写这些词，
@@ -755,27 +762,25 @@ USER_FACING_REPLACEMENTS = (
 
 
 def user_facing_text(text: str) -> str:
-    """单遍替换（1.8.2 审核观察①整改）。
+    """单遍替换：按源词长度倒序拼一条正则一次替换，替换结果不参与后续匹配。
 
-    顺序 str.replace 会级联：先"宿主 WebSearch→公开网络检索"，再"公开网络→检索来源"
-    会把刚替换的结果二次替换成"检索来源检索"。改为按源词长度倒序拼一条正则一次替换，
-    替换结果不参与后续匹配。配置的规则优先，未配置用默认表。
+    顺序 str.replace 会级联（如"宿主 WebSearch→公开网络检索"再被"公开网络→检索来源"
+    二次替换成"检索来源检索"）。配置的规则优先，未配置用默认表。
     """
     out = str(text or "")
     configured = (CONFIG.get("channels") or {}).get("user_facing_replacements") or []
     pairs = [(str(x[0]), str(x[1])) for x in configured if isinstance(x, (list, tuple)) and len(x) >= 2]
-    pairs = pairs or list(USER_FACING_REPLACEMENTS)
-    if not pairs:
-        return out
     mapping = {}
-    for src, dst in pairs:
-        mapping.setdefault(src, dst)
+    for src, dst in (pairs or USER_FACING_REPLACEMENTS):
+        mapping.setdefault(str(src), str(dst))
+    if not mapping:
+        return out
     pattern = re.compile("|".join(re.escape(src) for src in sorted(mapping, key=len, reverse=True)))
     return pattern.sub(lambda m: mapping[m.group(0)], out)
 
 
 def normalize_self_check(raw: Any) -> Optional[Dict[str, Dict[str, Any]]]:
-    """把 selfCheck / agentCheck 归一化为逐项结构化结果（1.8.2 两轨验收）。"""
+    """把 selfCheck / agentCheck 归一化为逐项结构化结果（两轨验收）。"""
     if not isinstance(raw, dict):
         return None
     items: Dict[str, Dict[str, Any]] = {}
@@ -816,7 +821,7 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
     missing_excerpts = [s["title"] for s in cited_sources if not (s.get("excerpt") or "").strip()]
     # 1.7.3：policy 版本索引/无正文材料显式标为不可引用，即使有摘录也不得作为正文依据
     uncitable = [s["title"] for s in cited_sources if s.get("citable") is False]
-    # 1.8.2 责任分配：脚本轨只判**结构**——正文依据必须有可展开摘录、且非不可引用材料。
+    # 1.0.2 责任分配：脚本轨只判**结构**——正文依据必须有可展开摘录、且非不可引用材料。
     # 内容类判断（数字/标准号/地域/缺席/金额对象/措辞）全部交给 AI 验收，不在此判红。
     bad_ids = {s["id"] for s in cited_sources
                if s.get("citable") is False or not (s.get("excerpt") or "").strip()}
@@ -844,7 +849,8 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
             "old_count": sum(1 for y, _ in dated if y <= generated_at.year - 3),
         }
 
-    # ⑤ 成稿自检：由溯源 JSON 的 self_check 传入，未传入如实显示未记录
+    # ⑤ 成稿自检（AI 验收轨）：由溯源 JSON 的 selfCheck/agentCheck 传入，未传入如实显示未记录
+    # （selfCheck/agentCheck 均可，agentCheck 是 1.0.2 起的别名）
     self_check_raw = None
     for holder in (payload, payload.get("content") if isinstance(payload.get("content"), dict) else {}):
         self_check_raw = self_check_raw or holder.get("selfCheck") or holder.get("self_check") \
@@ -857,8 +863,8 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
         pending = sum(1 for item in self_items.values() if item.get("status") == "pending")
         evidence_missing = [label for label, item in self_items.items()
                             if item.get("status") == "evidence_missing"]
-        # 状态只由显式 fail 决定：none / evidence_missing 不拖垮结论（红项只给真正声明未通过的项）；
-        # evidence_missing 单独点名，表示"声明通过但证据不可回查"。
+        # 状态只由显式 fail 决定：none（值无法识别，如描述性文本）不拖垮结论；
+        # evidence_missing（声明通过但无可回查证据）单独点名，按结构违约拦在交付前。
         self_check = {"items": self_items, "passed": passed, "total": len(self_items), "failed": failed,
                       "pending": pending, "evidence_missing": evidence_missing,
                       "status": "fail" if failed else "pass"}
@@ -866,7 +872,7 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
         self_check = {"items": {}, "passed": 0, "total": len(self_check_items()), "failed": 0,
                       "pending": 0, "evidence_missing": [], "status": "missing"}
 
-    # 1.8.2：脚本不再做任何内容判断（数字/标准号/地域/缺席/金额/措辞均归 AI）。
+    # 1.0.2：脚本不再做任何内容判断（数字/标准号/地域/缺席/金额/措辞均归 AI）。
 
     # ⑥ 域内核验记录（--verify-file）：业务 Skill 自己的核验器（verify_claims 等）产出。
     # 只做"并入"：verdict 为 fail / 记录指纹失效（答案或证据在核验后被改）按硬错误；
@@ -912,12 +918,12 @@ def compute_verification(answer: str, sources: List[Dict[str, str]], payload: Di
 
     trace_ok = bool(cited_sources) and not bad_ids
     binding_ok = (not unbound) and not no_citation
-    # 1.8.2：结构问题不再注入成 AI 验收项——脚本只管结构、AI 只管内容，两轨各自呈现。
+    # 1.0.2：结构问题不再注入成 AI 验收项——脚本只管结构、AI 只管内容，两轨各自呈现。
     # 自检显式"未通过"纳为报告级否决项：不能自检失败还顶部打绿章。
-    # 1.8.2：声明通过但没有可回查证据 = 结构不合规（contract 违约），同样拦在交付前；
+    # 1.0.2：声明通过但没有可回查证据 = 结构不合规（contract 违约），同样拦在交付前；
     # pending（待人工复核）不算未通过，允许出报告。
     self_check_ok = (self_check["status"] != "fail") and not (self_check.get("evidence_missing") or [])
-    # 1.8.2 两轨验收汇总：脚本轨（上面各指标）+ Agent 轨（五项自检与证据）
+    # 1.0.2 两轨验收汇总：脚本轨（上面各指标）+ Agent 轨（五项自检与证据）
     agent_track = {
         "enabled": bool(agent_track_config().get("enabled", True)),
         "require_evidence": bool(agent_track_config().get("require_evidence", True)),
@@ -1493,10 +1499,9 @@ def render_verify_panel(v: Dict[str, Any]) -> str:
     else:
         fr_html = '<div class="vi"><span class="s none">— 材料新旧 未记录</span><span class="d">材料没标发布日期</span></div>'
 
-    # 材料构成：1.8.2 起**不再展示**。类型分类依赖接口 类型 字段，而它与实际文体常年不符
-    # （govSite 的规范性文件被算作"材料"、第三方网页被算作"政策依据"），界定成本高且会误导读者；
-    # 正文依据条数已由「依据溯源 N/N」直接给出，构成分类对读者没有实际决策价值。
-
+    # 材料构成：类型分类依赖输入的 类型 字段，而它与实际文体常年对不上（官方公告显示成
+    # "材料"、第三方网页显示成"政策依据"），界定成本高、对读者无决策价值，不再展示；
+    # 正文依据条数已由「依据溯源 N/N」直接给出。
     # 域内核验行（--verify-file）：只在业务 Skill 传入核验记录时出现
     vr = v.get("verify") or {}
     verify_html = ""
@@ -1541,7 +1546,7 @@ def render_verify_panel(v: Dict[str, Any]) -> str:
         if pend:
             detail_parts.append(f"{pend} 项待人工复核")
         sc_html = (f'<div class="vi"><span class="s {cls}">{mark} {head}</span>'
-                   f'<span class="d">{esc("；".join(detail_parts) if detail_parts else "五项均给出可回查证据")}</span></div>')
+                   f'<span class="d">{esc("；".join(detail_parts) if detail_parts else "各项目均给出可回查证据")}</span></div>')
         items = [(label, item) for label, item in sc["items"].items()]
         if items:
             _li = "".join(f"<li><b>{esc(label)}</b>：{esc(_item_text(label, item))}</li>" for label, item in items)
@@ -1563,11 +1568,9 @@ def render_verify_panel(v: Dict[str, Any]) -> str:
                 f'<details class="v-checks"><summary>查看 AI 验收明细（{len(items)} 项）</summary>'
                 f'<ul>{_li}</ul></details>')
     else:
-        sc_html = ('<div class="vi"><span class="s none">— AI 验收 未记录</span>'
-                   '<span class="d">本次输入没有写入 Agent 验收结论</span></div>')
+        sc_html = '<div class="vi"><span class="s none">— AI 验收 未记录</span>' \
+                  '<span class="d">本次输入没有写入 Agent 验收结论</span></div>'
 
-    # "现行效力"人工复核提示行已移除（2026-09-19 起）：政策是否现行有效无法自动判定，
-    # 该提示对用户无操作价值；1.8.2 起材料类型分类也不再展示（见上）。
     manual = ""
 
     return f"""
@@ -1672,8 +1675,8 @@ def render_section_cards(sections: List[Dict[str, Any]], sources: List[Dict[str,
             badge_html = ""
             if sec_cites:
                 unbound = sum(1 for cid in sec_cites if cid not in source_ids)
-                # 1.7.3：章节“已核验”必须覆盖该章引用的全部材料；存在无摘录/不可引用
-                # 材料时改为黄色待补提示，不能只校验角标绑定。
+                # 章节徽标只判结构（1.0.2）：该章引用的全部材料可作依据（有摘录、可引用）；
+                # 内容是否被原文支持归 AI 验收，脚本不背书。
                 _sec_sources = [s for s in sources if s.get("id") in sec_cites]
                 _bad = [s for s in _sec_sources
                         if s.get("citable") is False or not (s.get("excerpt") or "").strip()]
@@ -1776,7 +1779,7 @@ def render_source_card(source: Dict[str, str], for_print: bool = False) -> str:
         vk = f'<span class="sc-vk warn" title="{esc(reason)}">◐ 不可引用</span>'
         note_html = f'<div class="sc-vnote">{esc(short(reason, 90))}</div>'
     elif source.get("verified"):
-        # 1.8.2：来源卡只标结构状态（有可展开摘录、材料可引用），不标"内容核验通过"——
+        # 1.0.2：来源卡只标结构状态（有可展开摘录、材料可引用），不标"内容核验通过"——
         # 内容是否被原文支持由 AI 验收判定，脚本不背书。
         note = source.get("verify_note") or "摘录可比对，原文或存档快照可回看"
         vk = f'<span class="sc-vk ok" title="{esc(note)}">✓ 可作为正文依据</span>'
@@ -1802,15 +1805,15 @@ def render_source_card(source: Dict[str, str], for_print: bool = False) -> str:
                       '标题为模型从原文动态抽取，非规则提取">高可信</span>')
     # 已引用材料显示角标编号；未引用召回材料显示"未引用"灰标（不占正文角标号）
     id_html = f'<span class="sc-id">[{esc(source["id"])}]</span>' if source.get("used", True) else '<span class="sc-unused">未引用</span>'
-    # 非官方来源徽标（1.6.0）：联网路召回的非权威站点材料，报告页与知识专库卡统一标注
+    # 非官方来源徽标：联网路召回的非权威站点材料，报告页与知识专库卡统一标注；
+    # 其中政府域名/官方机构名的归为「公开网络·官方」（官方信源不应作为问题）。
     _unofficial_text = "非官方来源"
     official_badge = ('<span class="sc-official" title="公开网络检索到的官方信源（政府机构/法定机构），请以原文复核">公开网络·官方</span>'
                       if source.get("official_external") else "")
     unofficial_badge = (f'<span class="sc-unofficial" title="公开网络检索的非官方来源，仅供参考，建议以官方口径复核">{_unofficial_text}</span>'
                         if source.get("unofficial") else "")
-    # 1.8.2：不再显示"材料类型"标签——接口的 类型 字段与文体常年对不上（govSite 的官方公告
-    # 显示成"材料"、第三方计算器显示成"政策依据"），界定成本高、对读者无实际决策价值。
-    # 卡片只保留有明确事实依据的徽标：高可信（接口可信度）、公开网络·官方／非官方来源、可作为正文依据。
+    # 来源卡不再显示"材料类型"标签——输入的类型字段与实际文体常年对不上，界定成本高、
+    # 对读者无决策价值。卡片只保留有明确事实依据的徽标：高可信、公开网络·官方／非官方来源、引用核验态。
     body_html = (f'<div class="sc-head">{id_html}'
                  f'{conf_badge}{official_badge}{unofficial_badge}{vk}</div>'
                  f'<h4>{esc(source.get("title"))}</h4>'
@@ -2230,7 +2233,6 @@ code{padding:1px 5px;border-radius:4px;background:#f3f4f6;color:#3f3d52;
 .jb-label svg{flex:none}
 .jb-unofficial{display:inline-flex;align-items:center;font-size:10.5px;font-weight:700;color:#9a3412;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:0 7px;margin-right:6px;white-space:nowrap}
 .sc-unofficial{display:inline-flex;align-items:center;font-size:10.5px;font-weight:700;color:#9a3412;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:0 7px;white-space:nowrap}
-.sc-official{display:inline-flex;align-items:center;font-size:10.5px;font-weight:700;color:#0b4f6c;background:#e6f4fb;border:1px solid #a9d8ea;border-radius:6px;padding:0 7px;white-space:nowrap}
 .jb-site{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#70678a;background:#f6f4fa;
   border:1px solid var(--line);border-radius:999px;padding:3.5px 10px;max-width:100%;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap;margin:0 0 2px}
@@ -2300,6 +2302,7 @@ a.jb-quote{text-decoration:none}
 .sc-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .sc-id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;font-size:11px;color:#fff;background:var(--grad);
   border-radius:6px;padding:2px 8px}
+.sc-official{display:inline-flex;align-items:center;font-size:10.5px;font-weight:700;color:#0b4f6c;background:#e6f4fb;border:1px solid #a9d8ea;border-radius:6px;padding:0 7px;white-space:nowrap}
 .sc-vk{margin-left:auto;font-size:11px;font-weight:700;color:#15803d}
 .sc-vk.warn{color:#b45309}
 .sc-unused{font-size:10.5px;font-weight:700;color:#64748b;background:#f1f5f9;border-radius:5px;
@@ -2917,14 +2920,14 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
     sources = align_sources_to_answer(answer, extract_sources(payload, snapshot_enabled=snapshot_enabled))
     # 角标按首次出现顺序重排为 1..N（含材料卡同步重编号与未引用分组），WorkBuddy 实测反馈要求
     answer, sources = renumber_citations(answer, sources)
-    # 1.8.2：内容判断全部归 AI——渲染器不做任何"某句是否被原文支持"的判断，
+    # 1.0.2：内容判断全部归 AI——渲染器不做任何"某句是否被原文支持"的判断，
     # 只保证结构（角标绑定、摘录可比对、不可引用材料不作依据、自检有据）。
     used = citation_ids(answer)
     generated_at = generated_at or datetime.now()
     generated = generated_at.strftime("%Y-%m-%d %H:%M")
 
     verification = compute_verification(answer, sources, payload, generated_at)
-    # 1.8.2：不合格不进交付——结构不合格或 AI 验收未通过时直接退出，不生成 HTML。
+    # 1.0.2 两轨验收：不合格不进交付——结构不合格或 AI 验收未通过时直接退出，不生成 HTML。
     # 交付物只有"合格"这一种形态；发现问题就修复后重跑，而不是把问题交给用户。
     if not verification["overall"]["passed"]:
         _reasons = verification["overall"].get("reasons") or []
@@ -3002,6 +3005,7 @@ def render_html(payload: Dict[str, Any], title: str, answer_override: str = "", 
 
     # 正文页的来源性质提示：引用了公开网络材料时，给用户一个可见、统一的标记，
     # 不暴露三阶段/检索通道；具体逐条标记仍在溯源核验报告的材料卡与引文胶囊上。
+    # 1.0.2 来源等级：官方外部信源（政府/法定机构域名或机构名）单独提示，不与"非官方"混同。
     cited_third_party = any((s.get("unofficial") or s.get("pending")) and s.get("used", True)
                             for s in sources)
     cited_official_ext = any(s.get("official_external") and s.get("used", True) for s in sources)

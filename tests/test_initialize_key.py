@@ -161,9 +161,13 @@ def main():
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             init.main()
-        payload = json.loads(buf.getvalue())
+        out = buf.getvalue()
+        # 1.8.3：ready 时 JSON 之后会追加一行跨平台闸门标记 [GATE-PASS]，解析前剥离
+        payload = json.loads("\n".join(line for line in out.splitlines()
+                                       if not line.startswith("[GATE-PASS]")))
         check("main 输出 key_validated", payload.get("key_validated") is True)
         check("main ready=true", payload.get("ready") is True and payload.get("blocking_issues") == [])
+        check("ready 时输出闸门标记", "[GATE-PASS] initialize" in out)
     finally:
         init.check_api_key_config, init.check_update = old_check_api, old_check_update
         init._resolve_key_value, init._verify_key = old_resolve, old_verify

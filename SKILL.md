@@ -7,7 +7,7 @@ description: "当用户需要可信搜索、权威材料检索、政策法规/�
 description_zh: "深知可信搜索（法律、政策、标准）是由北京彩智科技有限公司旗下“深知可信智能”提供的可信搜索与权威材料检索 Skill，面向政策法规、政务办事依据、税务社保、公积金、企业补贴、资质证照、行业标准、公共服务、合规义务、政策调研、城市政策对比和企业投资/技改/税惠材料核验等工作场景。检索按问题复杂度分级：单对象/单地域的枚举与单点事实用可信搜索，≥2 个对象/地域需对比并列或跨地域跨层级聚合、或用户明确表达深度意图时才用深度搜索，用户明确要求时总是调用深度搜索；输出带权威来源、知识专库、可点击溯源的单文件 HTML 产出物。"
 description_en: "dknowc trusted search is a trusted search and authoritative-source retrieval Skill provided by dknowc Trusted Intelligence under Beijing Caizhi Technology Co., Ltd. It supports policy, regulation, government-service evidence, standards, compliance, subsidy, tax-benefit and policy research tasks. Retrieval is tiered by question complexity: single-object or single-region questions (including enumerations such as “what policies exist”) use trusted search, while deep search is used only for two or more objects/regions being compared or aggregated across regions and levels, or on explicit user request. Delivers a direct answer and a single-file HTML deliverable with three switchable pages (body without markers, provenance verification report, knowledge library), with Markdown and PDF export."
 category: "office-efficiency"
-version: "1.8.2"
+version: "1.8.3"
 author: 彩智科技
 permissions:
   network:
@@ -61,7 +61,7 @@ mkdir -p "$RUN"
 - 用户明确说“深度搜索、深度分析、全面查找、多轮核验、完整方案、深度核验”等意图时，**总是**调用 `scripts/deep_query.py`（复杂问题即便用户未明说也按分级自动走深度搜索）。
 - ReAct 逻辑保留：如果问题缺少会影响结论的关键信息，先追问；如果先搜索后发现证据不足或条件依赖明显，再向用户补问关键条件。复杂问题仍按分级走深度搜索，追问时机不变。
 - 最终解决问题时必须交付：直接回复答案 + **单文件产出物 HTML**（顶部三页切换：正文（去索引）／溯源核验报告／知识专库，默认落在溯源核验报告页；正文页即干净正文，顶栏可导出 Markdown 与 PDF）。中间追问和阶段性 ReAct 过程不要求交付。
-- **有人要图也好、自己判断要图也好，图表一律并入那份核验报告 HTML**：同一版本的任务只交付这一份 HTML，没有第二份内容不同的图表报告。是否画图按「可视化」章的明确判据判定（`对比/梳理/分析/系统` 等分析措辞**不算**画图指令）；判定要图时用 `render_trace_html.py --charts-json` 一次成稿。**修改/追加后重跑**：仍传原来的 `--output` 名，**$RUN 内同名文件直接覆盖**（内部草稿不计版本）；交付到用户目录时若已有同名且内容不同，才由 `deliver_outputs.py` 另存 `_v2`。
+- **有人要图也好、自己判断要图也好，图表一律并入那份核验报告 HTML**：同一版本的任务只交付这一份 HTML，没有第二份内容不同的图表报告。是否画图按「可视化」章的明确判据判定（`对比/梳理/分析/系统` 等分析措辞**不算**画图指令）；判定要图时用 `render_gate.py --charts-json` 一次成稿。**修改/追加后重跑**：仍传原来的 `--output` 名，**$RUN 内同名文件直接覆盖**（内部草稿不计版本）；交付到用户目录时若已有同名且内容不同，才由 `deliver_outputs.py` 另存 `_v2`。
 - 最终答案必须先由 Agent 基于搜索材料综合形成，再保存为文本，通过 `scripts/build_trace_input.py --answer-file`（或直接给渲染器 `--answer-file`）传入。HTML 正文页与报告页来自同一份最终答案（正文页由脚本自动去角标生成，不经手工摘抄）。
 - 最终答案中的关键事实、金额、比例、适用条件、办理路径、政策名称、标准条款等必须标来源角标，例如 `[1]`、`[2]`。角标必须能被接口返回的材料标题、摘要、段落摘录或原文支撑。
 - **角标挂载纪律（防"形式绑定"）**：角标必须挂在**直接载有该条款原文**的材料上——以"点击这个角标后用户看到的摘录能否印证这句话"为判断标准。由多份材料综合得出的结论，逐条拆开、分别挂到直接载有该条款的材料；**禁止把具体条件、数字、程序类结论挂到仅主题相关但不载有该条款的材料上**（如把办理条件挂在一份"认可目录"通知上）。找不到直接载有该条款的材料时：换绑正确材料、继续搜索补证，或把该条降级标注"待核验"，三选一，不得将就挂载。
@@ -95,6 +95,12 @@ mkdir -p "$RUN"
   - **未通过即否决（硬约束）**：任一项写 `fail`（含"未通过"），整体结论立即为"核验未通过"，不存在"大部分通过"。
   - **提交写法**：`selfCheck` 每项写对象 `{"verdict":"pass|fail|pending","basis":"判定依据","evidence":["[10] 沪府规〔2025〕8号第五条", "..."]}`；`pending` 表示待人工复核（不否决）。旧的纯字符串写法（`"通过：说明"`）仍兼容，但说明里没有可回查要素时会显示为证据不足。
 - 用户明确说“不要 HTML/不要文件”时，才跳过文件交付；否则产出物 HTML 是最终交付的一部分。
+
+## 命令约定（跨平台）
+
+- 文档统一以 `python3 scripts/xxx.py` 书写命令，macOS/Linux 直接可用。**Windows 注意**：`python3` 是微软商店的应用执行别名（占位符），运行结果为零输出、零报错、拿不到退出码——此时解释器根本没有执行，**必须改用 `python`（或 `py`）重新运行**，不得把零输出当作成功。
+- 关键闸门脚本（`initialize.py`、`check_release.py`、`render_gate.py`、`build_trace_input.py`）成功时输出含统一标记 **`[GATE-PASS]`**。判据是**"退出码 0 且输出含 [GATE-PASS]"**，缺一即视为未通过：零输出、报错、无标记都不得当作通过，必须换命令重跑或修正输入后重跑。`initialize.py` 的标记绑定 `ready` 语义：环境未就绪时只输出 JSON、不打标。
+- 本节约定覆盖全部 reference 文档中的 `python3` 命令与闸门判据，不逐处重复标注。
 
 ## 启动初始化
 
@@ -222,7 +228,7 @@ node scripts/register_key.mjs register --phone <手机号> --vcode <验证码> -
      --question-file "$RUN/dknowc_search_question.txt"
    # ② 渲染（图表数据整理成 $RUN/viz_data.json，按需加 --charts-json）
    #    --output 由 Agent 命名：取答案标题的 8-20 字短名（见下方命名规则）
-   python3 {baseDir}/scripts/render_trace_html.py "$RUN/input.json" \
+   python3 {baseDir}/scripts/render_gate.py "$RUN/input.json" \
      --run "$RUN" --output "<简短文件名>.html" \
      --config "{baseDir}/config/trace_report.config.json" \
      [--charts-json viz_data.json] \
@@ -340,12 +346,12 @@ python3 {baseDir}/scripts/build_trace_input.py --run "$RUN" \
   --answer-file dknowc_search_answer.txt \
   --self-check-file dknowc_search_selfcheck.json \
   --question-file dknowc_search_question.txt
-python3 {baseDir}/scripts/render_trace_html.py "$RUN/input.json" --run "$RUN" \
+python3 {baseDir}/scripts/render_gate.py "$RUN/input.json" --run "$RUN" \
   --output "<简短文件名>.html" \
   --config "{baseDir}/config/trace_report.config.json"
 ```
 
-`render_trace_html.py` 生成**单文件产出物 HTML**（1.5.0 起三页架构），输出《简短文件名.html》到 `$RUN/`（文件名由 Agent 用 `--output` 命名）：
+`render_gate.py`（包装内核 `render_trace_html.py`）生成**单文件产出物 HTML**（1.5.0 起三页架构），输出《简短文件名.html》到 `$RUN/`（文件名由 Agent 用 `--output` 命名）：
 
 - **三页切换**（hero 区顶部，打开默认落在溯源核验报告页）：**正文（去索引）**——干净正式正文（无角标）+ 文头标题；**溯源核验报告**——「AI 自验收」过程条（检索按接口通道拆分计数：深度搜索 N 路 · 可信补搜 M 次）+ 五项核验单 + 带角标正文（文头「溯源核验报告：{标题}」）；**知识专库**（全屏：大搜索 + 检索分组 tabs（仅多分组时显示）+ 已引用材料卡 + 「未进入正文的参考材料」折叠区；按分组筛选时折叠区同步过滤、标题更新为"本组未进入正文的参考材料（N）"，标签数与可见结果一致）。顶栏工具：**复制全文（取正文页）/ 导出 ▾（导出 Markdown（正文）/ 导出 PDF（正文）/ 导出 PDF（溯源核验报告，三页顺序打印含材料附录））**。章节目录在正文页与报告页按当前视图双锚点定位，专库页隐藏。
 - **报告页正文形态（1.8.0 起）**：章节标题 + 句后数字角标 `[n]`（1.8.0 前是"编号徽章 + 材料标题"的胶囊）；点击角标弹出**引用依据弹窗**，内含该材料的完整溯源卡（多段分块原文摘录 + 面包屑标题链 + 查看全文/存档快照 + 核验状态），点遮罩、"收起"或按 Esc 关闭；正文里不再内联塞入标题与摘录。同一段落内同一材料只保留最后一处角标。每章标题右侧标注"本章引用 N 处 · 已核验"；该章存在硬错误时改为"本章引用 N 处 · K 条引用未通过"，只有软提醒时改为"本章引用 N 处 · K 条待人工复核"。角标按首次出现顺序自动重排为 1..N（正文先引 [n≠1] 也不会错位）。
@@ -367,10 +373,10 @@ python3 {baseDir}/scripts/render_trace_html.py "$RUN/input.json" --run "$RUN" \
 
 报告渲染能力内置自「溯源核验报告生成器」1.0.1（上游单源），随本包物理分发，用户无需另装：
 
-- **脚本**：`scripts/render_trace_html.py`（渲染内核）、`scripts/build_report_input.py`（上游通用入口）、`scripts/build_trace_input.py`（本产品入口包装：补来源展示口径与未引用标记）、`scripts/trust_digest.py`、`scripts/chart_embed.py`、`scripts/run_paths.py`。
+- **脚本**：`scripts/render_trace_html.py`（渲染内核，与上游「溯源核验报告生成器」1.0.2 **逐字节一致**）、`scripts/build_report_input.py`（上游通用入口，原样）、`scripts/render_gate.py`（渲染闸门包装：内核保持上游原样，核验通过后的 `[GATE-PASS]` 标记由本包装输出）、`scripts/build_trace_input.py`（本产品入口包装：补来源展示口径、未引用标记与 `agentCheck` 别名透传）、`scripts/trust_digest.py`、`scripts/chart_embed.py`、`scripts/run_paths.py`（均与上游 1.0.2 逐字节一致）。
 - **配置**：`config/trace_report.config.json`（品牌/通道/自检标签/图表/域内核验）。调整报告样式或核验口径时，由上游统一改版、本产品按版本适配，不在本包内改渲染代码。
 - **严格单输入**：渲染器只认 `materials` 通用 JSON；检索/merge 产物一律先经 `build_trace_input.py` 转换（内部调用上游入口并补充本产品字段语义）。
-- **退出码**：`0` 成功；`1` 生成前硬校验未通过（有材料无角标 / 角标未绑定）；`2` 输入、参数或路径错误。
+- **退出码**：`0` 成功（且输出含 `[GATE-PASS]`，判据见「命令约定（跨平台）」）；`1` 生成前硬校验未通过（有材料无角标 / 角标未绑定）；`2` 输入、参数或路径错误。
 - **调用方式**：用普通 `python3` 调用，不要加 `-I`（隔离模式会移除脚本目录导致同目录导入失败）。
 
 ## 深度搜索调用
@@ -385,7 +391,7 @@ python3 {baseDir}/scripts/build_trace_input.py dknowc_deep_converted.json --run 
   --answer-file dknowc_deep_answer.txt \
   --self-check-file dknowc_deep_selfcheck.json \
   --question "用户原始问题"
-python3 {baseDir}/scripts/render_trace_html.py "$RUN/input.json" --run "$RUN" \
+python3 {baseDir}/scripts/render_gate.py "$RUN/input.json" --run "$RUN" \
   --output "<简短文件名>.html" \
   --config "{baseDir}/config/trace_report.config.json"
 ```
@@ -481,7 +487,7 @@ skills.sh Public 版 API Key 统一且只通过 `DKNOWC_API_KEY` 提供；读取
 
 生成核验报告时同时传入图表数据，图表随报告一并产出（步骤见「标准工作流」第 6~7 步与下方调用示例）。
 
-**硬约束：图表必须由脚本生成，禁止手搓。** 只有一条路：入口生成 `input.json` 后给 `scripts/render_trace_html.py` 传 `--charts-json`——**禁止 Agent 手写 Python 拼 SVG/HTML、禁止手工把图插进报告、禁止绕过脚本自建图表**（手搓图无法绑定来源链接、难以回归验证）。
+**硬约束：图表必须由脚本生成，禁止手搓。** 只有一条路：入口生成 `input.json` 后给 `scripts/render_gate.py` 传 `--charts-json`——**禁止 Agent 手写 Python 拼 SVG/HTML、禁止手工把图插进报告、禁止绕过脚本自建图表**（手搓图无法绑定来源链接、难以回归验证）。
 
 四类图型与对应的数据键（`scripts/chart_embed.py` 实际支持的就是这四类，不支持的不要硬凑）：
 - `items` + `metrics` 对象×指标 → **每指标一张柱状图**（如九市 GDP 对比、补贴金额对比）
@@ -515,7 +521,7 @@ skills.sh Public 版 API Key 统一且只通过 `DKNOWC_API_KEY` 提供；读取
 # 图表数据写进 $RUN/viz_data.json；
 # 先经入口生成 input.json（见标准工作流第 7 步），再与核验报告一次成稿——
 # 本次任务最终只交付这 1 个 HTML
-python3 {baseDir}/scripts/render_trace_html.py "$RUN/input.json" --run "$RUN" \
+python3 {baseDir}/scripts/render_gate.py "$RUN/input.json" --run "$RUN" \
   --output "<简短文件名>.html" \
   --config "{baseDir}/config/trace_report.config.json" \
   --charts-json viz_data.json

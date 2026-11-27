@@ -1,5 +1,11 @@
 # 更新日志
 
+## 1.8.3-skills-sh - 2026-11-27
+
+- 同步母版 `1.8.3`：新增 `scripts/render_gate.py` 渲染闸门包装（内核保持上游 1.0.2 逐字节，`[GATE-PASS]` 由包装输出）；SKILL 渲染命令统一改走 `render_gate.py`；config 吸收 `official_host_allow`；新增「命令约定（跨平台）」节与闸门退出码口径。
+- 渠道化沿用既有规则：skills.sh注册渠道码 `8C8D411C-6A46-4E99-887D-87D9A1329930`，slug `dknowc-trusted-search-skills-sh`，attribution channel `skills-sh`；脚本层 skillhub 清零；内核 5 脚本与上游逐字节一致。
+
+
 ## 1.8.2-skills-sh - 2026-11-24
 
 - 同步母版 `1.8.2`：两轨判定（结构核验 ∧ AI 验收，任一不过不出报告）；脚本只判结构、内容归 AI；`claim_audit.py` 已删除；来源等级与「公开网络·官方」口径；注册默认一步发码（注册通行码通道，失败回落三步）；本机状态文件 `maas_registration_session.json`；版本缓存直接覆盖写；渲染门禁 exit 1。
